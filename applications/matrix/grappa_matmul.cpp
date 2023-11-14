@@ -13,7 +13,7 @@
 using namespace Grappa;
 
 // const size_t MATRIX_SIZE = 32768/4;
-const size_t MATRIX_SIZE = 1024;
+const size_t MATRIX_SIZE = 16;
 
 
 void subadd(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, GlobalAddress<int32_t> c, 
@@ -114,20 +114,35 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b,  G
     size_t br_row_start = m, br_col_start = m;
 
     GlobalAddress <int32_t> a11 = global_alloc<int32_t>(m*m);
+
+    double start = walltime();
     subadd(a, a, a11, tl_row_start, tl_col_start, br_row_start, br_col_start, m0, m0, m);
+    std::cout << "subadd for a11 takes " << walltime() - start << " seconds" << std::endl;
+
     GlobalAddress <int32_t> aa2 = global_alloc<int32_t>(m*m);
     subadd(a, a, aa2, bl_row_start, bl_col_start, br_row_start, br_col_start, m0, m0, m);
+
+    double aa3_start = walltime();
     GlobalAddress <int32_t> aa3 = global_alloc<int32_t>(m*m);
     subcpy(a, aa3, tl_row_start, tl_col_start, m0, m);
+    std::cout << "subcpy for aa3 takes " << walltime() - aa3_start << " seconds" << std::endl;
+
     GlobalAddress <int32_t> aa4 = global_alloc<int32_t>(m*m);
     subcpy(a, aa4, br_row_start, br_col_start, m0, m);
+
+    double aa5_start = walltime();
     GlobalAddress <int32_t> aa5 = global_alloc<int32_t>(m*m);
     subsub(a, a, aa5, tl_row_start, tl_col_start, tr_row_start, tr_col_start, m0, m0, m);
+    std::cout << "subsub for aa5 takes " << walltime() - aa5_start << " seconds" << std::endl;
+
     GlobalAddress <int32_t> aa6 = global_alloc<int32_t>(m*m);
     subsub(a, a, aa6, bl_row_start, bl_col_start, tl_row_start, tl_col_start, m0, m0, m);
     GlobalAddress <int32_t> aa7 = global_alloc<int32_t>(m*m);
     subsub(a, a, aa7, tr_row_start, tr_col_start, br_row_start, br_col_start, m0, m0, m);
 
+    std::cout << "Get a11-a77 takes " << walltime() - start << " seconds" << std::endl;
+
+    start = walltime();
     GlobalAddress <int32_t> b11 = global_alloc<int32_t>(m*m);
     subadd(b, b, b11, tl_row_start, tl_col_start, br_row_start, br_col_start, m0, m0, m);
     GlobalAddress <int32_t> bb2 = global_alloc<int32_t>(m*m);
@@ -142,6 +157,7 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b,  G
     subadd(b, b, bb6, tl_row_start, tl_col_start, tr_row_start, tr_col_start, m0, m0, m);
     GlobalAddress <int32_t> bb7 = global_alloc<int32_t>(m*m);
     subadd(b, b, bb7, bl_row_start, bl_col_start, br_row_start, br_col_start, m0, m0, m);
+    std::cout << "Get b11-b77 takes " << walltime() - start << " seconds" << std::endl;
 
     std::cout << "level: " << level << std::endl;
     global_free(a);
@@ -153,37 +169,44 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b,  G
 
     if(level == 1 || level == 2){
         GlobalAddress<int32_t> m1 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        std::cout << "size of a11: " << sizeof(a11) << std::endl;
+        std::cout << "size of b11: " << sizeof(b11) << std::endl;
+        std::cout << "size of m1: " << sizeof(m1) << std::endl;
+        std::cout << "size of m: " << sizeof(m) << std::endl;
+        std::cout << "size of level: " << sizeof(level) << std::endl;
+        std::cout << "size of local_gce: " << sizeof(&local_gce) << std::endl;
+
+        spawn<TaskMode::Unbound>(&local_gce, [a11, b11, m1, m, level]{
             distributed_strassen(a11, b11, m1, m, level + 1);
         });
 
         GlobalAddress<int32_t> m2 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa2, bb2, m2, m, level]{
             distributed_strassen(aa2, bb2, m2, m, level + 1);
         });
 
         GlobalAddress<int32_t> m3 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa3, bb3, m3, m, level]{
             distributed_strassen(aa3, bb3, m3, m, level + 1);
         });
 
         GlobalAddress<int32_t> m4 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa4, bb4, m4, m, level]{
             distributed_strassen(aa4, bb4, m4, m, level + 1);
         });
 
         GlobalAddress<int32_t> m5 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa5, bb5, m5, m, level]{
             distributed_strassen(aa5, bb5, m5, m, level + 1);
         });
 
         GlobalAddress<int32_t> m6 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa6, bb6, m6, m, level]{
             distributed_strassen(aa6, bb6, m6, m, level + 1);
         });
 
         GlobalAddress<int32_t> m7 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa7, bb7, m7, m, level]{
             distributed_strassen(aa7, bb7, m7, m, level + 1);
         });
 
@@ -212,37 +235,37 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b,  G
     } else {
         // level = 3
         GlobalAddress<int32_t> m1 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [a11, b11, m1, m]{
             remote_strassen_mul(a11, b11, m1, m);
         });
 
         GlobalAddress<int32_t> m2 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa2, bb2, m2, m]{
             remote_strassen_mul(aa2, bb2, m2, m);
         });
 
         GlobalAddress<int32_t> m3 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa3, bb3, m3, m]{
             remote_strassen_mul(aa3, bb3, m3, m);
         });
 
         GlobalAddress<int32_t> m4 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa4, bb4, m4, m]{
             remote_strassen_mul(aa4, bb4, m4, m);
         });
 
         GlobalAddress<int32_t> m5 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa5, bb5, m5, m]{
             remote_strassen_mul(aa5, bb5, m5, m);
         });
 
         GlobalAddress<int32_t> m6 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa6, bb6, m6, m]{
             remote_strassen_mul(aa6, bb6, m6, m);
         });
 
         GlobalAddress<int32_t> m7 = global_alloc<int32_t>(m*m);
-        spawn<TaskMode::Unbound>(&local_gce, [=]{
+        spawn<TaskMode::Unbound>(&local_gce, [aa7, bb7, m7, m]{
             remote_strassen_mul(aa7, bb7, m7, m);
         });
 
