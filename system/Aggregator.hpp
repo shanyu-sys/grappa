@@ -605,7 +605,7 @@ extern Aggregator global_aggregator;
 
 
 
-/// Aggregate a message.
+/// Aggregate a message. 
 ///
 ///  @param destination core that will receive this message
 ///  @param fn_p function pointer of handler to run on reception

@@ -3,6 +3,7 @@
 #include <Collective.hpp>
 #include <GlobalAllocator.hpp>
 #include <iostream>
+#include <thread>
 
 using namespace Grappa;
 
@@ -55,6 +56,12 @@ GlobalAddress<Block> grappa_alloc(size_t byte_size) {
 int main(int argc, char *argv[])
 {
   init(&argc, &argv);
+  // create a new thread and say hello world
+  std::thread t([]() {
+    std::cout << "Hello world from thread " << mycore() << " of " << cores() << std::endl;
+  });
+  t.join();
+  
   run([]
       {
         std::cout << "size of block: " << block_size << std::endl;
@@ -100,5 +107,6 @@ int main(int argc, char *argv[])
         std::cout << "SUCCESS" << std::endl;
         int dealloc_success = grappa_dealloc(array_addr);
       });
+  t.join();
   finalize();
 }

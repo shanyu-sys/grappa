@@ -31,7 +31,8 @@ int main( int argc, char * argv[] ) {
     size_t num_vertices = 1000;
     
     GlobalAddress<Vertex> root = create_tree(num_vertices);
-    
+
+    // static create method allocates space on each core, initializes them all, and returns a symmetric GlobalAddress that resolves to the proxy on each core.
     GlobalAddress<GlobalVector<index_t>> rv = GlobalVector<index_t>::create(num_vertices);
     
     // initialize all cores

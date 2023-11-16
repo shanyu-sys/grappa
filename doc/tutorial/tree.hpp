@@ -54,7 +54,7 @@ struct Vertex {
         
     forall<async>(first_child, num_children, [](int64_t i, Vertex& child){
       child.init(i);
-    });
+    }); 
   }
 };
 

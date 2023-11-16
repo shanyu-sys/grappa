@@ -24,17 +24,18 @@ using namespace Grappa;
 struct Vertex {
   int64_t * local_adj; // adjacencies that are local
   int64_t nadj;        // number of adjacencies
-  int64_t local_sz;    // size of local allocation (regardless of how full it is)
+  int64_t local_sz;    // size of local allocation (regardless of how full it is), total capacity of the local_adj array. 
+                       //   (this is the size of the array that was allocated, not the number of adjacencies)
   // int64_t parent;
-  void * vertex_data;
+  void * vertex_data; 
   
   Vertex(): local_adj(nullptr), nadj(0), local_sz(0) {}    
-  ~Vertex() {}
+  ~Vertex() {}   //destructor of the Vertex
   
   template< typename F >
   void forall_adj(F body) {
     for (int64_t i=0; i<nadj; i++) {
-      body(local_adj[i]);
+      body(local_adj[i]); // call body on each adjacency
     }
   }
   
