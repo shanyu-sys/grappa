@@ -62,16 +62,31 @@ void subcpy(GlobalAddress<int32_t> a, GlobalAddress<int32_t> result,
 void constitute(GlobalAddress<int32_t> m11, GlobalAddress<int32_t> m12, GlobalAddress<int32_t> m21, GlobalAddress<int32_t> m22,
                 GlobalAddress<int32_t> result, size_t m)
 {
-    for (int i = 0; i < m; i++)
-    {
-        for (int j = 0; j < m; j++)
-        {
-            delegate::write(result + i * m * 2 + j, delegate::read(m11 + i * m + j));
-            delegate::write(result + i * m * 2 + m + j, delegate::read(m12 + i * m + j));
-            delegate::write(result + (i + m) * m * 2 + j, delegate::read(m21 + i * m + j));
-            delegate::write(result + (i + m) * m * 2 + m + j, delegate::read(m22 + i * m + j));
-        }
-    }
+    forall(result, m * m * 4, [=](int64_t i, int32_t &result)
+        {   
+            // calculate the row and column index from i
+            size_t row_index = i / (m * 2);
+            size_t col_index = i % (m * 2);
+            size_t m_index = row_index / m * 2 + col_index / m;
+            size_t index = row_index % m * m + col_index % m;
+            switch (m_index)
+            {
+            case 0:
+                result = delegate::read(m11 + index);
+                break;
+            case 1:
+                result = delegate::read(m12 + index);
+                break;
+            case 2:
+                result = delegate::read(m21 + index);
+                break;
+            case 3:
+                result = delegate::read(m22 + index);
+                break;
+            default:
+                break;
+            }
+        });
 }
 
 void sub(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, size_t m)
@@ -108,6 +123,7 @@ void remote_strassen_mul(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Glo
 
     Matrix local_c = strassen_mul(local_a, local_b);
 
+    double write_start = walltime();
     for (int i = 0; i < m; i++)
     {
         for (int j = 0; j < m; j++)
@@ -115,6 +131,7 @@ void remote_strassen_mul(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Glo
             delegate::write(c + i * m + j, local_c.elements[i * m + j]);
         }
     }
+    std::cout << "core " << mycore() << ": Write local_c to global c takes " << walltime() - write_start << " seconds" << std::endl;
 }
 
 // distributed strassen multiplication
@@ -122,7 +139,7 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Gl
 {
     CompletionEvent local_gce;
 
-    std::cout << "level: " << level << " core: " << mycore() << std::endl;
+    std::cout << "level " << level << " core " << mycore() << ": distributed_strassen start" << std::endl;
     size_t m = m0 / 2;
     // Submatrix indices
     size_t tl_row_start = 0, tl_col_start = 0;
@@ -131,57 +148,38 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Gl
     size_t br_row_start = m, br_col_start = m;
 
     GlobalAddress<int32_t> aa1 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> aa2 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> aa3 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> aa4 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> aa5 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> aa6 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> aa7 = global_alloc<int32_t>(m * m);
+
+    GlobalAddress<int32_t> bb1 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> bb2 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> bb3 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> bb4 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> bb5 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> bb6 = global_alloc<int32_t>(m * m);
+    GlobalAddress<int32_t> bb7 = global_alloc<int32_t>(m * m);
 
     double start = walltime();
     subadd(a, a, aa1, tl_row_start, tl_col_start, br_row_start, br_col_start, m0, m0, m);
-    std::cout << "subadd for aa1 takes " << walltime() - start << " seconds" << std::endl;
-
-    GlobalAddress<int32_t> aa2 = global_alloc<int32_t>(m * m);
     subadd(a, a, aa2, bl_row_start, bl_col_start, br_row_start, br_col_start, m0, m0, m);
-
-    double aa3_start = walltime();
-    GlobalAddress<int32_t> aa3 = global_alloc<int32_t>(m * m);
     subcpy(a, aa3, tl_row_start, tl_col_start, m0, m);
-    std::cout << "subcpy for aa3 takes " << walltime() - aa3_start << " seconds" << std::endl;
-
-    GlobalAddress<int32_t> aa4 = global_alloc<int32_t>(m * m);
     subcpy(a, aa4, br_row_start, br_col_start, m0, m);
-
-    GlobalAddress<int32_t> aa5 = global_alloc<int32_t>(m * m);
     subadd(a, a, aa5, tl_row_start, tl_col_start, tr_row_start, tr_col_start, m0, m0, m);
-
-    GlobalAddress<int32_t> aa6 = global_alloc<int32_t>(m * m);
-    double aa6_start = walltime();
     subsub(a, a, aa6, bl_row_start, bl_col_start, tl_row_start, tl_col_start, m0, m0, m);
-    std::cout << "subsub for aa6 takes " << walltime() - aa6_start << " seconds" << std::endl;
-
-    GlobalAddress<int32_t> aa7 = global_alloc<int32_t>(m * m);
     subsub(a, a, aa7, tr_row_start, tr_col_start, br_row_start, br_col_start, m0, m0, m);
 
-    std::cout << "Get aa1-a77 takes " << walltime() - start << " seconds" << std::endl;
-
-    start = walltime();
-    GlobalAddress<int32_t> bb1 = global_alloc<int32_t>(m * m);
     subadd(b, b, bb1, tl_row_start, tl_col_start, br_row_start, br_col_start, m0, m0, m);
-    GlobalAddress<int32_t> bb2 = global_alloc<int32_t>(m * m);
     subcpy(b, bb2, tl_row_start, tl_col_start, m0, m);
-    GlobalAddress<int32_t> bb3 = global_alloc<int32_t>(m * m);
     subsub(b, b, bb3, tr_row_start, tr_col_start, br_row_start, br_col_start, m0, m0, m);
-    GlobalAddress<int32_t> bb4 = global_alloc<int32_t>(m * m);
     subsub(b, b, bb4, bl_row_start, bl_col_start, tl_row_start, tl_col_start, m0, m0, m);
-    GlobalAddress<int32_t> bb5 = global_alloc<int32_t>(m * m);
     subcpy(b, bb5, br_row_start, br_col_start, m0, m);
-    GlobalAddress<int32_t> bb6 = global_alloc<int32_t>(m * m);
     subadd(b, b, bb6, tl_row_start, tl_col_start, tr_row_start, tr_col_start, m0, m0, m);
-    GlobalAddress<int32_t> bb7 = global_alloc<int32_t>(m * m);
     subadd(b, b, bb7, bl_row_start, bl_col_start, br_row_start, br_col_start, m0, m0, m);
-    std::cout << "Get bb1-bb7 takes " << walltime() - start << " seconds" << std::endl;
-
-    std::cout << "level: " << level << std::endl;
-    global_free(a);
-    std::cout << "a freed" << std::endl;
-    global_free(b);
-    std::cout << "b freed" << std::endl;
+    std::cout << "level " << level << " core " << mycore() << ": Get aa1-aa7 and bb1-bb7 takes " << walltime() - start << " seconds" << std::endl;
 
     GlobalAddress<int32_t> m1 = global_alloc<int32_t>(m*m);
     GlobalAddress<int32_t> m2 = global_alloc<int32_t>(m*m);
@@ -190,6 +188,8 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Gl
     GlobalAddress<int32_t> m5 = global_alloc<int32_t>(m*m);
     GlobalAddress<int32_t> m6 = global_alloc<int32_t>(m*m);
     GlobalAddress<int32_t> m7 = global_alloc<int32_t>(m*m);
+
+    double matmul_start = walltime();
 
     if (level == 1)
     {
@@ -253,29 +253,31 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Gl
             remote_strassen_mul(aa7, bb7, m7, m);
         });
     }
-        local_gce.wait();
+    local_gce.wait();
 
-        sub(m7, m5, m);
-        add(m7, m4, m);
-        add(m7, m1, m);
+    std::cout << "level " << level << ": Matrix size: " << m << ", matmul takes " << walltime() - matmul_start << " seconds" << std::endl;
 
-        add(m5, m3, m);
-        add(m4, m2, m);
+    sub(m7, m5, m);
+    add(m7, m4, m);
+    add(m7, m1, m);
 
-        sub(m1, m2, m);
-        add(m1, m3, m);
-        add(m1, m6, m);
+    add(m5, m3, m);
+    add(m4, m2, m);
 
-        constitute(m7, m5, m4, m1, c, m);
+    sub(m1, m2, m);
+    add(m1, m3, m);
+    add(m1, m6, m);
 
-        global_free(m1);
-        global_free(m2);
-        global_free(m3);
-        global_free(m4);
-        global_free(m5);
-        global_free(m6);
-        global_free(m7);
-        return;
+    constitute(m7, m5, m4, m1, c, m);
+
+    global_free(m1);
+    global_free(m2);
+    global_free(m3);
+    global_free(m4);
+    global_free(m5);
+    global_free(m6);
+    global_free(m7);
+    return;
 }
 
 int main(int argc, char *argv[])
