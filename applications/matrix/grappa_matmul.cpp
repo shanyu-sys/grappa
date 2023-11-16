@@ -12,7 +12,7 @@
 using namespace Grappa;
 
 // const size_t MATRIX_SIZE = 32768/4;
-const size_t MATRIX_SIZE = 32;
+const size_t MATRIX_SIZE = 1024;
 
 GlobalCompletionEvent gce;
 
@@ -182,104 +182,76 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Gl
     global_free(b);
     std::cout << "b freed" << std::endl;
 
+    GlobalAddress<int32_t> m1 = global_alloc<int32_t>(m*m);
+    GlobalAddress<int32_t> m2 = global_alloc<int32_t>(m*m);
+    GlobalAddress<int32_t> m3 = global_alloc<int32_t>(m*m);
+    GlobalAddress<int32_t> m4 = global_alloc<int32_t>(m*m);
+    GlobalAddress<int32_t> m5 = global_alloc<int32_t>(m*m);
+    GlobalAddress<int32_t> m6 = global_alloc<int32_t>(m*m);
+    GlobalAddress<int32_t> m7 = global_alloc<int32_t>(m*m);
+
     if (level == 1)
     {
-        GlobalAddress<int32_t> m1 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa1, bb1, m1, m, level]{
             distributed_strassen(aa1, bb1, m1, m, level + 1);
         });
 
-        GlobalAddress<int32_t> m2 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa2, bb2, m2, m, level]{
             distributed_strassen(aa2, bb2, m2, m, level + 1);
         });
 
-        GlobalAddress<int32_t> m3 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa3, bb3, m3, m, level]{
             distributed_strassen(aa3, bb3, m3, m, level + 1);
         });
 
-        GlobalAddress<int32_t> m4 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa4, bb4, m4, m, level]{
             distributed_strassen(aa4, bb4, m4, m, level + 1);
         });
 
-        GlobalAddress<int32_t> m5 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa5, bb5, m5, m, level]{
             distributed_strassen(aa5, bb5, m5, m, level + 1);
         });
 
-        GlobalAddress<int32_t> m6 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa6, bb6, m6, m, level]{
             distributed_strassen(aa6, bb6, m6, m, level + 1);
         });
 
-        GlobalAddress<int32_t> m7 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa7, bb7, m7, m, level]{
             distributed_strassen(aa7, bb7, m7, m, level + 1);
         });
 
-        local_gce.wait();
-
-        sub(m7, m5, m);
-        add(m7, m4, m);
-        add(m7, m1, m);
-
-        add(m5, m3, m);
-        add(m4, m2, m);
-
-        sub(m1, m2, m);
-        add(m1, m3, m);
-        add(m1, m6, m);
-
-        constitute(m7, m5, m4, m1, c, m);
-        global_free(m1);
-        global_free(m2);
-        global_free(m3);
-        global_free(m4);
-        global_free(m5);
-        global_free(m6);
-        global_free(m7);
-        return;
     }
     else
     {
         // level = 3
-        GlobalAddress<int32_t> m1 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa1, bb1, m1, m]{
             remote_strassen_mul(aa1, bb1, m1, m);
         });
 
-        GlobalAddress<int32_t> m2 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa2, bb2, m2, m]{
             remote_strassen_mul(aa2, bb2, m2, m);
         });
 
-        GlobalAddress<int32_t> m3 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa3, bb3, m3, m]{
             remote_strassen_mul(aa3, bb3, m3, m);
         });
 
-        GlobalAddress<int32_t> m4 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa4, bb4, m4, m]{
             remote_strassen_mul(aa4, bb4, m4, m);
         });
 
-        GlobalAddress<int32_t> m5 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa5, bb5, m5, m]{
             remote_strassen_mul(aa5, bb5, m5, m);
         });
 
-        GlobalAddress<int32_t> m6 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa6, bb6, m6, m]{
             remote_strassen_mul(aa6, bb6, m6, m);
         });
 
-        GlobalAddress<int32_t> m7 = global_alloc<int32_t>(m*m);
         spawn(&local_gce, [aa7, bb7, m7, m]{
             remote_strassen_mul(aa7, bb7, m7, m);
         });
-
+    }
         local_gce.wait();
 
         sub(m7, m5, m);
@@ -303,7 +275,6 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Gl
         global_free(m6);
         global_free(m7);
         return;
-    }
 }
 
 int main(int argc, char *argv[])
