@@ -123,7 +123,13 @@ void remote_strassen_mul(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Glo
 
     Matrix local_c = strassen_mul(local_a, local_b);
 
-    double write_start = walltime();
+    //  doesn't work due to GlobalCompletionEvent.hpp:297] Check failed: count == 0 (16 vs. 0)
+    // GlobalAddress <Matrix> local_c_addr = make_global(&local_c);
+    // forall(c, m * m, [=](int64_t i, int32_t &c)
+    //        { c = delegate::call(local_c_addr, [=](Matrix &local_c) {
+    //          return local_c.elements[i]; });
+    //         });
+
     for (int i = 0; i < m; i++)
     {
         for (int j = 0; j < m; j++)
@@ -131,7 +137,6 @@ void remote_strassen_mul(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Glo
             delegate::write(c + i * m + j, local_c.elements[i * m + j]);
         }
     }
-    std::cout << "core " << mycore() << ": Write local_c to global c takes " << walltime() - write_start << " seconds" << std::endl;
 }
 
 // distributed strassen multiplication
@@ -255,7 +260,7 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Gl
     }
     local_gce.wait();
 
-    std::cout << "level " << level << ": Matrix size: " << m << ", matmul takes " << walltime() - matmul_start << " seconds" << std::endl;
+    std::cout << "level " << level << " core " << mycore() << ": Matrix size: " << m << ", matmul takes " << walltime() - matmul_start << " seconds" << std::endl;
 
     sub(m7, m5, m);
     add(m7, m4, m);
@@ -295,11 +300,12 @@ int main(int argc, char *argv[])
 
             auto C = global_alloc<int32_t>(MATRIX_SIZE * MATRIX_SIZE);
 
-            std::cout << "start" << std::endl;
+            double start = walltime();
             spawn<&gce>([=]
                         { distributed_strassen(A, B, C, MATRIX_SIZE, 1); });
 
             gce.wait();
+            std::cout << "Execution time: " << walltime() - start << " seconds" << std::endl;
 
             for (int i = MATRIX_SIZE - 16; i < MATRIX_SIZE; i++)
             {
