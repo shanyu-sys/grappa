@@ -15,6 +15,25 @@ using namespace Grappa;
 const size_t MATRIX_SIZE = 1024;
 
 GlobalCompletionEvent gce;
+GlobalCompletionEvent level1_gce;
+GlobalCompletionEvent level2_gce;
+
+struct Params
+{
+    GlobalAddress<int32_t> a;
+    GlobalAddress<int32_t> b;
+    GlobalAddress<int32_t> c;
+    size_t m;
+    u_int32_t level;
+};
+
+struct RemoteParams
+{
+    GlobalAddress<int32_t> a;
+    GlobalAddress<int32_t> b;
+    GlobalAddress<int32_t> c;
+    size_t m;
+};
 
 void subadd(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, GlobalAddress<int32_t> c,
             size_t a_row_start, size_t a_col_start, size_t b_row_start, size_t b_col_start,
@@ -103,6 +122,7 @@ void add(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, size_t m)
 
 void remote_strassen_mul(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, GlobalAddress<int32_t> c, size_t m)
 {
+    std::cout << "level 3 core " << mycore() << ": remote_strassen_mul start" << std::endl;
     std::vector<int32_t> local_a_vector(m * m);
     std::vector<int32_t> local_b_vector(m * m);
 
@@ -137,12 +157,18 @@ void remote_strassen_mul(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Glo
             delegate::write(c + i * m + j, local_c.elements[i * m + j]);
         }
     }
+    std::cout << "level 3 core " << mycore() << ": remote_strassen_mul end" << std::endl;
 }
 
 // distributed strassen multiplication
-void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, GlobalAddress<int32_t> c, size_t m0, u_int32_t level)
+void distributed_strassen(GlobalAddress<Params> p)
 {
-    CompletionEvent local_gce;
+    Params params = delegate::read(p);
+    GlobalAddress<int32_t> a = params.a;
+    GlobalAddress<int32_t> b = params.b;
+    GlobalAddress<int32_t> c = params.c;
+    size_t m0 = params.m;
+    u_int32_t level = params.level;
 
     std::cout << "level " << level << " core " << mycore() << ": distributed_strassen start" << std::endl;
     size_t m = m0 / 2;
@@ -198,67 +224,113 @@ void distributed_strassen(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Gl
 
     if (level == 1)
     {
-        spawn(&local_gce, [aa1, bb1, m1, m, level]{
-            distributed_strassen(aa1, bb1, m1, m, level + 1);
+        Core origin = mycore();
+        Params params1 = {aa1, bb1, m1, m, level + 1};
+        Params params2 = {aa2, bb2, m2, m, level + 1};
+        Params params3 = {aa3, bb3, m3, m, level + 1};
+        Params params4 = {aa4, bb4, m4, m, level + 1};
+        Params params5 = {aa5, bb5, m5, m, level + 1};
+        Params params6 = {aa6, bb6, m6, m, level + 1};
+        Params params7 = {aa7, bb7, m7, m, level + 1};
+
+        GlobalAddress <Params> params1_addr = make_global(&params1, 1);
+        GlobalAddress <Params> params2_addr = make_global(&params2, 2);
+        GlobalAddress <Params> params3_addr = make_global(&params3, 3);
+        GlobalAddress <Params> params4_addr = make_global(&params4, 4);
+        GlobalAddress <Params> params5_addr = make_global(&params5, 5);
+        GlobalAddress <Params> params6_addr = make_global(&params6, 6);
+        GlobalAddress <Params> params7_addr = make_global(&params7, 7);
+
+        forall<SyncMode::Async, &level1_gce>(params1_addr, 1, [=](int64_t i, Params &params1){
+            distributed_strassen(params1_addr);
         });
 
-        spawn(&local_gce, [aa2, bb2, m2, m, level]{
-            distributed_strassen(aa2, bb2, m2, m, level + 1);
+        forall<SyncMode::Async, &level1_gce>(params2_addr, 1, [=](int64_t i, Params &params2){
+            distributed_strassen(params2_addr);
         });
 
-        spawn(&local_gce, [aa3, bb3, m3, m, level]{
-            distributed_strassen(aa3, bb3, m3, m, level + 1);
+        forall<SyncMode::Async, &level1_gce>(params3_addr, 1, [=](int64_t i, Params &params3){
+            distributed_strassen(params3_addr);
         });
 
-        spawn(&local_gce, [aa4, bb4, m4, m, level]{
-            distributed_strassen(aa4, bb4, m4, m, level + 1);
+        forall<SyncMode::Async, &level1_gce>(params4_addr, 1, [=](int64_t i, Params &params4){
+            distributed_strassen(params4_addr);
+            // level1_gce.complete();
         });
 
-        spawn(&local_gce, [aa5, bb5, m5, m, level]{
-            distributed_strassen(aa5, bb5, m5, m, level + 1);
+        forall<SyncMode::Async, &level1_gce>(params5_addr, 1, [=](int64_t i, Params &params5){
+            distributed_strassen(params5_addr);
         });
 
-        spawn(&local_gce, [aa6, bb6, m6, m, level]{
-            distributed_strassen(aa6, bb6, m6, m, level + 1);
+        forall<SyncMode::Async, &level1_gce>(params6_addr, 1, [=](int64_t i, Params &params6){
+            distributed_strassen(params6_addr);
         });
 
-        spawn(&local_gce, [aa7, bb7, m7, m, level]{
-            distributed_strassen(aa7, bb7, m7, m, level + 1);
+        forall<SyncMode::Async, &level1_gce>(params7_addr, 1, [=](int64_t i, Params &params7){
+            distributed_strassen(params7_addr);
         });
 
+        level1_gce.wait();
+        std::cout << "level " << level << " core " << mycore() << ": level 1 end" << std::endl;
     }
     else
     {
+        std::cout << "level " << level << " core " << mycore() << ": level 2 start" << std::endl;
+        // RemoteParams remote_params1 = {aa1, bb1, m1, m};
+        // RemoteParams remote_params2 = {aa2, bb2, m2, m};
+        // RemoteParams remote_params3 = {aa3, bb3, m3, m};
+        // RemoteParams remote_params4 = {aa4, bb4, m4, m};
+        // RemoteParams remote_params5 = {aa5, bb5, m5, m};
+        // RemoteParams remote_params6 = {aa6, bb6, m6, m};
+        // RemoteParams remote_params7 = {aa7, bb7, m7, m};
+
+        // GlobalAddress <RemoteParams> remote_params1_addr = make_global(&remote_params1);
+        // GlobalAddress <RemoteParams> remote_params2_addr = make_global(&remote_params2);
+        // GlobalAddress <RemoteParams> remote_params3_addr = make_global(&remote_params3);
+        // GlobalAddress <RemoteParams> remote_params4_addr = make_global(&remote_params4);
+        // GlobalAddress <RemoteParams> remote_params5_addr = make_global(&remote_params5);
+        // GlobalAddress <RemoteParams> remote_params6_addr = make_global(&remote_params6);
+        // GlobalAddress <RemoteParams> remote_params7_addr = make_global(&remote_params7);
+
         // level = 3
-        spawn(&local_gce, [aa1, bb1, m1, m]{
+        level2_gce.enroll(7);
+        spawn(&level2_gce, [aa1, bb1, m1, m]{
             remote_strassen_mul(aa1, bb1, m1, m);
+            level2_gce.complete();
         });
 
-        spawn(&local_gce, [aa2, bb2, m2, m]{
+        spawn(&level2_gce, [aa2, bb2, m2, m]{
             remote_strassen_mul(aa2, bb2, m2, m);
+            level2_gce.complete();
         });
 
-        spawn(&local_gce, [aa3, bb3, m3, m]{
+        spawn(&level2_gce, [aa3, bb3, m3, m]{
             remote_strassen_mul(aa3, bb3, m3, m);
+            level2_gce.complete();
         });
 
-        spawn(&local_gce, [aa4, bb4, m4, m]{
+        spawn(&level2_gce, [aa4, bb4, m4, m]{
             remote_strassen_mul(aa4, bb4, m4, m);
+            level2_gce.complete();            
         });
 
-        spawn(&local_gce, [aa5, bb5, m5, m]{
+        spawn(&level2_gce, [aa5, bb5, m5, m]{
             remote_strassen_mul(aa5, bb5, m5, m);
+            level2_gce.complete();
         });
 
-        spawn(&local_gce, [aa6, bb6, m6, m]{
+        spawn(&level2_gce, [aa6, bb6, m6, m]{
             remote_strassen_mul(aa6, bb6, m6, m);
+            level2_gce.complete();
         });
 
-        spawn(&local_gce, [aa7, bb7, m7, m]{
+        spawn(&level2_gce, [aa7, bb7, m7, m]{
             remote_strassen_mul(aa7, bb7, m7, m);
+            level2_gce.complete();
         });
+        level2_gce.wait();
+        std::cout << "level " << level << " core " << mycore() << ": level 2 end" << std::endl;
     }
-    local_gce.wait();
 
     std::cout << "level " << level << " core " << mycore() << ": Matrix size: " << m << ", matmul takes " << walltime() - matmul_start << " seconds" << std::endl;
 
@@ -300,9 +372,12 @@ int main(int argc, char *argv[])
 
             auto C = global_alloc<int32_t>(MATRIX_SIZE * MATRIX_SIZE);
 
+            Params params = {A, B, C, MATRIX_SIZE, 1};
+            GlobalAddress<Params> params_addr = make_global(&params);
+
             double start = walltime();
             spawn<&gce>([=]
-                        { distributed_strassen(A, B, C, MATRIX_SIZE, 1); });
+                        { distributed_strassen(params_addr); });
 
             gce.wait();
             std::cout << "Execution time: " << walltime() - start << " seconds" << std::endl;
