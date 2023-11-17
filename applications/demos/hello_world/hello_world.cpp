@@ -42,151 +42,67 @@
 
 using namespace Grappa;
 
-template<typename T>
-class ThreadSafeQueue {
-private:
-    std::queue<T> queue;
-    std::mutex mtx;
-    std::condition_variable cv;
-    bool finished = false;
-
-public:
-    void push(const T& value) {
-        std::lock_guard<std::mutex> lock(mtx);
-        queue.push(value);
-        cv.notify_one();
-    }
-
-    bool pop(T& value) {
-        std::unique_lock<std::mutex> lock(mtx);
-        cv.wait(lock, [&](){ return !queue.empty() || finished; });
-        if (queue.empty()) {
-            return false;
-        }
-        value = queue.front();
-        queue.pop();
-        return true;
-    }
-
-    void signal_finished() {
-        std::lock_guard<std::mutex> lock(mtx);
-        finished = true;
-        cv.notify_all();
-    }
-};
-
-
-// grappa_thread = none;
-// input_queue = none;
-// output_queue = None;
-
-// def connect():
-//     input_queue = Queue()
-//     output_queue = Queue()
-//     grappa_thread = thread() {
-//       grappa.init()
-//       grappa.run() {
-//         run_on_all_cores {
-//           while (true) {
-//             if (input_queue.empty()) {
-//               break;
-//             }
-//             taks = input_queue.pop()
-//             case task:
-//               read: Grappa::delegate::read;
-//               write: Grappa::delegate::write;
-
-//              output_queue.put(task_result)
-//           }
-//         }
-//       }
-//     }
-
-//     thread.start()
-
-//     input_queue.push(connect_task)
-
-
-// def read():
-
-//    input_queue.push(read_taks)
-
-//    while output_queue.empty():
-//      pass
-//    result = output_queue.pop()
-//    return result
-
-
-// main() {
-//   connect()
-//   xxx = read(xxx, xxx)
-//   write()
-// }
 
 int main( int argc, char * argv[] ) {
   init( &argc, &argv );
-  std::mutex mtx;
-  std::condition_variable cv;
-  bool finished = false;
-  int current_core = mycore();
-  std::cout << "current core is " << current_core << std::endl;
-
-  ThreadSafeQueue<std::string> queue;
-
-
-  std::thread t([&]() {
-        // Simulate work
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        // std::cout << "Hello world from thread " << std::this_thread::get_id() << std::endl;
-
-        // Signal that the thread has finished its work
-        {
-          std::lock_guard<std::mutex> lock(mtx);
-          finished = true;
-        }
-        cv.notify_one();
-        queue.push("Hello world from new thread of thread " + std::to_string(mycore()) + " of " + std::to_string(cores()));
-        
-        // Signal that production is finished
-        queue.signal_finished();
-  });
-     // Consumer code to be run in parallel
-    auto consumer_func = [&]() {
-
-    };
-
-
-  // Detach the thread so it will run independently
-  t.detach();
-  run([&]{
-    for (int i=0; i<cores(); i++) {
-      Grappa::delegate::call(i, [i, current_core, &queue]{
-        std::cout << "i is " << i << " current_core is " << current_core << std::endl;
-        // if(i == current_core){
-          std::string value;
-          while (queue.pop(value)) {
-              // Process the value
-              LOG(INFO) << value;
-          }
-        // }
-      });
-    }
-
+   
+  run([]{
+    LOG(INFO) << "'main' task started";
     
-    on_all_cores([&]{
-      // LOG(INFO) << "Hello world from locale " << mylocale() << " core " << mycore() << " hostname " << hostname();
-      // std::string value;
-      // while (queue.pop(value)) {
+    std::cout << "total cores " << cores() << std::endl; 
+    std::cout << "total locales " << locales() << std::endl;
 
-      //   std::cout << value << std::endl;
-      // }
+    CompletionEvent joiner;
+    
+    spawn(&joiner, []{
+      LOG(INFO) << "task ran on " << mycore();
+      // do some work
+      int64_t x = 0;
+      for (int i=0; i<100000000; i++) {
+        x += i;
+      }
+      LOG(INFO) << "task done on " << mycore();
     });
     
+    spawn<TaskMode::Unbound>(&joiner, []{
+      LOG(INFO) << "unbound task 1 ran on core " << mycore() << " locale " << mylocale();
+      // do some work
+      int64_t x = 0;
+      for (int i=0; i<100000000; i++) {
+        x *= i;
+      }
+    });
+
+    int64_t x = 0;
+    GlobalAddress<int64_t> x_addr = make_global(&x, 11);
+
+    delegate::call<async>(x_addr.core(), [x_addr]{
+      LOG(INFO) << "delegate call task ran on " << mycore();
+      // do some work
+      int64_t x = 0;
+      for (int i=0; i<100000000; i++) {
+        x += i;
+      }
+      LOG(INFO) << "task done on " << mycore();
+    });
+
+    // spawn<TaskMode::Unbound>(&joiner, []{
+    //   LOG(INFO) << "unbound task 2 ran on core " << mycore() << " locale " << mylocale();
+    //   // do some work
+    //   int64_t x = 0;
+    //   for (int i=0; i<100000000; i++) {
+    //     x *= i;
+    //   }
+    // });
+    
+    joiner.wait();
+    
+    on_all_cores([]{
+      LOG(INFO) << "Hello world from core " << mycore() << " locale " << mylocale();
+    });
+
+    LOG(INFO) << "all tasks completed, exiting...";
   });
-  {
-    std::unique_lock<std::mutex> lock(mtx);
-    cv.wait(lock, [&](){ return finished; });
-  }
 
   
   finalize();
