@@ -11,12 +11,13 @@
 
 using namespace Grappa;
 
-// const size_t MATRIX_SIZE = 32768/4;
-const size_t MATRIX_SIZE = 1024;
+const size_t MATRIX_SIZE = 32768/4;
+// const size_t MATRIX_SIZE = 2048;
 
 GlobalCompletionEvent gce;
 GlobalCompletionEvent level1_gce;
 GlobalCompletionEvent level2_gce;
+GlobalCompletionEvent level3_gce;
 
 struct Params
 {
@@ -128,37 +129,59 @@ void remote_strassen_mul(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Glo
     std::vector<int32_t> local_a_vector(m * m);
     std::vector<int32_t> local_b_vector(m * m);
 
-    for (int i = 0; i < m; i++)
-    {
-        for (int j = 0; j < m; j++)
-        {
-            local_a_vector[i * m + j] = delegate::read(a + i * m + j);
-            local_b_vector[i * m + j] = delegate::read(b + i * m + j);
-        }
-    }
+    Matrix local_a(m, m, local_a_vector);
+    Matrix local_b(m, m, local_b_vector);
+    
+    double read_start = walltime();
+    GlobalAddress<Matrix> local_a_addr = make_global(&local_a);
+    GlobalAddress<Matrix> local_b_addr = make_global(&local_b);
+    forall<&level3_gce>(a, m * m, [=](int64_t i, int32_t &a)
+           { 
+            delegate::call(local_a_addr, [=](Matrix &local_a) {
+             local_a.elements[i] = a; });
+            });
+    
+    forall<&level3_gce>(b, m * m, [=](int64_t i, int32_t &b)
+           { 
+            delegate::call(local_b_addr, [=](Matrix &local_b) {
+             local_b.elements[i] = b; });
+            });
+    
+
+    level3_gce.wait();
+    // for (int i = 0; i < m; i++)
+    // {
+    //     for (int j = 0; j < m; j++)
+    //     {
+    //         local_a_vector[i * m + j] = delegate::read(a + i * m + j);
+    //         local_b_vector[i * m + j] = delegate::read(b + i * m + j);
+    //     }
+    // }
+    std::cout << "level 3 core " << mycore()  << " locale " << mylocale() << ": read takes " << walltime() - read_start << " seconds" << std::endl;
 
     global_free(a);
     global_free(b);
 
-    Matrix local_a(m, m, local_a_vector);
-    Matrix local_b(m, m, local_b_vector);
-
+    double matmul_start = walltime();
     Matrix local_c = strassen_mul(local_a, local_b);
+    std::cout << "level 3 core " << mycore()  << " locale " << mylocale() << ": matmul takes " << walltime() - matmul_start << " seconds" << std::endl;
 
-    //  doesn't work due to GlobalCompletionEvent.hpp:297] Check failed: count == 0 (16 vs. 0)
-    // GlobalAddress <Matrix> local_c_addr = make_global(&local_c);
-    // forall(c, m * m, [=](int64_t i, int32_t &c)
-    //        { c = delegate::call(local_c_addr, [=](Matrix &local_c) {
-    //          return local_c.elements[i]; });
-    //         });
+    double write_start = walltime();
+    GlobalAddress <Matrix> local_c_addr = make_global(&local_c);
+    forall<&level3_gce>(c, m * m, [=](int64_t i, int32_t &c)
+           { c = delegate::call(local_c_addr, [=](Matrix &local_c) {
+             return local_c.elements[i]; });
+            });
 
-    for (int i = 0; i < m; i++)
-    {
-        for (int j = 0; j < m; j++)
-        {
-            delegate::write(c + i * m + j, local_c.elements[i * m + j]);
-        }
-    }
+    level3_gce.wait();
+    // for (int i = 0; i < m; i++)
+    // {
+    //     for (int j = 0; j < m; j++)
+    //     {
+    //         delegate::write(c + i * m + j, local_c.elements[i * m + j]);
+    //     }
+    // }
+    std::cout << "level 3 core " << mycore()  << " locale " << mylocale() << ": write takes " << walltime() - write_start << " seconds" << std::endl;
     std::cout << "level 3 core " << mycore()  << " locale " << mylocale() << ": remote_strassen_mul end" << std::endl;
 }
 

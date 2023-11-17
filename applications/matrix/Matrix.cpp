@@ -98,7 +98,7 @@ Matrix constitute(const Matrix& m11, const Matrix& m12, const Matrix& m21, const
 }
 
 Matrix strassen_mul(const Matrix& a, const Matrix& b) {
-    if (a.row == 2) {
+    if (a.row == SINGLE_SIZE) {
         return mul_simple(a, b);
     }
 
