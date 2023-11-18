@@ -380,6 +380,9 @@ int main(int argc, char *argv[])
 
     run([]
         {
+            std::cout << "Number of nodes: " << locales() << std::endl;
+            std::cout << "Number of cores: " << cores() << std::endl;
+            std::cout << "Matrix size: " << MATRIX_SIZE << std::endl;
             auto A = global_alloc<int32_t>(MATRIX_SIZE * MATRIX_SIZE);
             Grappa::memset(A, 1, MATRIX_SIZE * MATRIX_SIZE);
 
