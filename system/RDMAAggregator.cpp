@@ -62,7 +62,7 @@ DECLARE_int64( log2_concurrent_receives );
 DECLARE_int64( log2_concurrent_sends );
 
 DEFINE_int64( rdma_workers_per_core, 1 << 6, "Number of RDMA deaggregation worker threads" );
-DEFINE_int64( rdma_buffers_per_core, 1 << 7, "Number of RDMA aggregated message buffers per core" );
+DEFINE_int64( rdma_buffers_per_core, 1 << 12, "Number of RDMA aggregated message buffers per core" );
 
 DEFINE_int64( rdma_threshold, 64, "Threshold in bytes below which we send immediately instead of using RDMA" );
 
