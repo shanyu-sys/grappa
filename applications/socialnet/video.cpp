@@ -5,15 +5,15 @@
 
 
 struct Frame {
-    std::vector<uint8_t> data;
-    
+    uint8_t data[FRAME_SIZE] = {0};
+
     Frame(const cv::Mat& mat) {
         if (mat.isContinuous()) {
-            data.assign(mat.data, mat.data + mat.total() * mat.elemSize());
+            memcpy(data, mat.data, FRAME_SIZE);
         } else {
             // Handle non-continuous case
             for (int i = 0; i < mat.rows; ++i) {
-                data.insert(data.end(), mat.ptr<uint8_t>(i), mat.ptr<uint8_t>(i) + mat.cols * mat.elemSize());
+                memcpy(data + i * mat.cols * mat.elemSize(), mat.ptr<uint8_t>(i), mat.cols * mat.elemSize());
             }
         }
     }
@@ -101,13 +101,13 @@ int main(){
     std::string filename = "frame" + std::to_string(i) + ".png";
 
     // Ensure the data size matches the expected size
-    if (video.frames[i].data.size() != video.width * video.height * 3) {
-        std::cerr << "Data size mismatch for frame " << i << video.frames[i].data.size()<< std::endl;
+    if (sizeof(video.frames[i].data) != video.width * video.height * 3) {
+        std::cerr << "Data size mismatch for frame " << i << sizeof(video.frames[i].data)<< std::endl;
         continue;
     }
 
     // Reconstruct the cv::Mat object
-    cv::Mat image(video.height, video.width, CV_8UC3, video.frames[i].data.data());
+    cv::Mat image(video.height, video.width, CV_8UC3, video.frames[i].data);
     
     if (!cv::imwrite(filename, image)) {
         std::cerr << "Failed to write frame " << i << std::endl;
