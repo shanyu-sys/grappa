@@ -45,7 +45,7 @@
 using namespace Grappa;
 
 // const uint32_t FRAME_SIZE = block_size;
-const uint32_t FRAME_SIZE = 48600 * 2;
+const uint32_t FRAME_SIZE = 16;
 
 struct Frame
 {
@@ -61,25 +61,15 @@ public:
   int width;
   int height;
 
-  Frame *frames;
-  GlobalAddress<Frame> frameaddrs[5];
-  // GlobalAddress<Frame> frames = global_alloc<Frame>(5);
+  GlobalAddress<Frame> frames = global_alloc<Frame>(5);
 
   // initialize
-  Video(int w, int h) : width(w), height(h)
-  {
-    std::cout << 10 << std::endl;
-    frames = new Frame[5];
-
-    std::cout << 11 << std::endl;
-  }
+  Video(int w, int h) : width(w), height(h) {}
 
   // add a frame
-  void addFrame(int i, Frame *f)
+  void addFrame(int i, Frame f)
   {
-    frames[i] = *f;
-    frameaddrs[i] = make_global(&frames[i]);
-    // std :: cout << "frame " << i << " on core " << mycore() << " with value 0 of " << frames[i].x[0] << std::endl;
+    delegate::write(frames + i, f);
   }
 
   // deep copy
@@ -87,29 +77,13 @@ public:
   {
     width = v.width;
     height = v.height;
-
-    // deep copy frames
-    frames = new Frame[5];
-    for (int i = 0; i < 5; i++)
-    {
-      frames[i] = v.frames[i];
-      // std::cout << "Done copying frame " << i << " on core " << mycore() << " with value 0 of " << frames[i].x[0] << std::endl;
-      frameaddrs[i] = make_global(&frames[i]);
-      std::cout << "Frame " << i << " Global Address: " << frameaddrs[i] << std::endl;
-    }
-
-    // frames = global_alloc<Frame>(5);
-    // memcpy(frames, v.frames, 5);
+    frames = global_alloc<Frame>(5);
+    memcpy(frames, v.frames, 5);
   }
-
-  // Destructor
-  // ~Video() {
-  //     delete[] frames;
-  // }
 
   GlobalAddress<Frame> getFrame(int i)
   {
-    return frameaddrs[i];
+    return frames + i;
   }
 };
 
@@ -117,23 +91,20 @@ public:
 Video create()
 {
   Video v(10, 10);
-  std::cout << 1 << std::endl;
   for (int i = 0; i < 5; i++)
   {
-    Frame *f = new Frame;
-    std::cout << 2 << std::endl;
-    // std::cout << "start creating frame " << i << " on core " << mycore() << std::endl;
+    Frame f;
     // intialize frame to be i
     for (int j = 0; j < FRAME_SIZE; j++)
     {
       // f.x[j] = uint8_t(i);
-      f->x[j] = i;
+      f.x[j] = i;
     }
-    std::cout << "frame " << i << " x value " << f->x[FRAME_SIZE - 1] << std::endl;
+    std::cout << "frame " << i << " x value " << f.x[0] << std::endl;
 
     v.addFrame(i, f);
 
-    // std::cout << "frame "<< i <<" written value " << delegate::read(v.getFrame(i)).x[FRAME_SIZE -1] << std::endl;
+    std::cout << "frame " << i << " written value " << delegate::read(v.frames + i).x[0] << std::endl;
   }
   return v;
 }
@@ -146,38 +117,42 @@ int main(int argc, char *argv[])
 
   run([]
       {
+        std::cout << "frame size " << FRAME_SIZE << std::endl;
 
-      on_all_cores([]{
-      if(mycore() == 2 || mycore() == 3){
-         std::cout << "core " << mycore() << " locale " << mylocale() << std::endl;
-         Video v = create();
-          std::cout << "Video created successfully!" << std::endl;
-          std::cout << "video height: " << v.height << std::endl;
-          std::cout << "video width: " << v.width << std::endl;
 
-          Frame f = delegate::read(v.getFrame(3));
-          std::cout << "Core " << mycore() << " test read back frame 3 x value " << f.x[0] << std::endl;
-          std::cout << "Core " << mycore() << " frame 3 x value " << f.x[0] << std::endl;
+    // LOG(INFO) << "'main' task started";
 
-          // create an array of videos
-          // std::vector<Video> videos;
-          // std::cout << "duplicating videos" << std::endl;
-          // for(int i = 0; i < 10; i++){
-          //   videos.emplace_back(v);
-          // }
-          // std::cout << "duplicated videos Done on core " << mycore() << std::endl;
-          }
+    // std::cout << "total cores " << cores() << std::endl;
+    // std::cout << "total locales " << locales() << std::endl;
+
+    // create a video on other core
+    // int64_t x = 0;
+    // GlobalAddress<int64_t> x_addr = make_global(&x, 1);
+
+    on_all_cores([]{
+      Video v = create();
+      // std::cout << "video height: " << v.height << std::endl;
+      // std::cout << "video width: " << v.width << std::endl;
+
+      Frame f = delegate::read(v.frames + 3);
+      // std::cout << "frame 3 x value " << f.x[0] << std::endl;
+
+      // create an array of videos
+      // std::vector<Video> videos;
+      for(int i = 0; i < 10; i++){
+        videos.emplace_back(v);
+      }
     });
 
-    //     GlobalAddress<Frame> video_1_frames_3 = delegate::call(2, []{
-    //       std::cout << "core " << mycore() << " locale " << mylocale() << std::endl;
-    //       Video video = videos[1];
-    //       return videos[1].getFrame(3);
-    //     });
-    // std::cout << "video_1_frames_3: " << video_1_frames_3 << std::endl; 
+    
+    GlobalAddress<Frame> frame1 = delegate::call(1, []{
+      return videos[1].frames;
+      
 
-    // Frame f = delegate::read(video_1_frames_3);
-    // std::cout << "frame 3 x value " << f.x[FRAME_SIZE - 1] << std::endl;
+    });
+
+    Frame f = delegate::read(frame1 + 3);
+    std::cout << "frame 3 x value " << f.x[0] << std::endl;
 
     // // read one video back
     // Video v2 = v;
