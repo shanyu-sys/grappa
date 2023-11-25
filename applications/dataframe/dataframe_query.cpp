@@ -177,7 +177,7 @@ int get_element_size(std::string datatype) {
 
 Series read_series(const std::string& file_name, std::string datatype, size_t series_id, size_t line_count) {
     // std::string full_path = "/mnt/ssd/haoran/types_proj/dataset/dataframe/my_" + file_name;
-    std::string full_path = "/mnt/ssd/shan/grappa/applications/dataframe/my_" + file_name;
+    std::string full_path = "/mnt/ssd/haoran/types_proj/baseline/grappa/applications/dataframe/my_" + file_name;
 
 
     // read first line of the file and get the headers
@@ -474,7 +474,7 @@ void print_result(std::vector<Series>& result_columns) {
 
 void print_input_file(std::string file_name, int line_count) {
     // std::string full_path = "/mnt/ssd/haoran/types_proj/dataset/dataframe/my_" + file_name;
-    std::string full_path = "/mnt/ssd/shan/grappa/applications/dataframe/my_" + file_name;
+    std::string full_path = "/mnt/ssd/haoran/types_proj/baseline/grappa/applications/dataframe/my_" + file_name;
     std::ifstream file(full_path);
     std::string line;
     for (int i = 0; i < line_count + 1; i++) {
