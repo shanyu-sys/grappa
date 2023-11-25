@@ -1,4 +1,6 @@
 ////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
 // Copyright (c) 2010-2015, University of Washington and Battelle
 // Memorial Institute.  All rights reserved.
 //
@@ -209,7 +211,7 @@ namespace Grappa {
         // , reset_count_(0)
         , delete_after_send_( false ) 
       {
-        CHECK( destination_ < cores() ) << "dest core out of bounds";
+        CHECK( destination_ < cores() ) << "dest core out of bounds" << " destination: " << destination_ << " cores: " << cores();
         DVLOG(9) << "construct " << this;
       }
 
