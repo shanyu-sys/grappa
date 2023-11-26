@@ -20,14 +20,16 @@ using namespace Grappa;
 // datatype: 0 int32 1 float64 2 uint32
 #define PATH "/mnt/ssd/haoran/types_proj/dataset/dataframe/my_"
 
-#define FILE_NAME "G1_1e5_1e2_0_0.csv"
-#define LINE_COUNT 100000
-// #define FILE_NAME "G1_1e7_1e2_0_0.csv"
-// #define LINE_COUNT 10000000
+// #define FILE_NAME "G1_1e5_1e2_0_0.csv"
+// #define LINE_COUNT 100000
+#define FILE_NAME "G1_1e7_1e2_0_0.csv"
+#define LINE_COUNT 10000000
+// #define FILE_NAME "G1_1e8_1e2_0_0.csv"
+// #define LINE_COUNT 100000000
 // #define FILE_NAME "group_2.csv"
 // #define LINE_COUNT 6
 
-#define READ_CHUNKS_PER_CORE 100000
+#define READ_CHUNKS_PER_CORE 1000000
 
 const size_t CHUNK_SIZE = 64;
 
@@ -95,6 +97,12 @@ public:
         }
         return _buffer[index];
     }
+};
+
+class FixedVector {
+public:
+    size_t length;
+    GlobalAddress<size_t> buffer;
 };
 
 class Chunk {
@@ -315,6 +323,7 @@ void agg_sum(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
     size_t num_chunks = result_value_column->num_chunks();
 
     forall<SyncMode::Async, &foralle>(result_data, num_chunks, [=](int64_t i, Chunk& value) {
+        std::cout << "Aggregate on core: " << Grappa::mycore() << std::endl;
         size_t result_stidx = i * CHUNK_SIZE / element_size;
         size_t result_edidx = (i + 1) * CHUNK_SIZE / element_size;
         if(result_edidx > length) {
@@ -322,9 +331,9 @@ void agg_sum(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
         }
         for (size_t j = result_stidx; j < result_edidx; j++) {
             size_t result_inner_idx = j % (CHUNK_SIZE / element_size);
-            if (j >= 10000) {
-                std::cout << "result_inner_idx: " << result_inner_idx << std::endl;
-            }
+            // if (j >= 10000) {
+            //     std::cout << "result_inner_idx: " << result_inner_idx << std::endl;
+            // }
             size_t vec_len = delegate::call(value_index + j, [](Vector* value) {
                 size_t vec_len = (*value).size();
                 return vec_len;
@@ -418,88 +427,171 @@ void agg_min(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
 // input: groupby column, aggregation columns, aggregation functions
 // output: result key column, result aggregation column
 
-void groupby() {
-
-
-}
-
-void groupby_agg(std::vector<Series> group_by_column,
-                 std::vector<std::tuple<Series, std::string>> agg_columns,
-                 std::vector<Series>& result_key_column,
-                    std::vector<Series>& result_agg_column) {
-    
-    std::map<std::vector<uint8_t>, std::vector<size_t>> hash_map;
-
-    size_t cnt = group_by_column[0].length();
-    for (int i = 0; i < cnt; i++) {
-        // get the key from the groupby column
-        std::vector<uint8_t> key;
-        for(Series series : group_by_column) {
-            // get 4 bytes key from the groupby column
-            size_t element_size = get_element_size(series.type);
-            uint8_t *key_start_byte = series.get(i);
-            for (size_t j = 0; j < element_size; j++) {
-                key.push_back(key_start_byte[j]);
-            }
-            delete[] key_start_byte;
-        }
-        // insert the key into the hash map
-        if (hash_map.find(key) == hash_map.end()) {
-            std::vector<size_t> value;
-            value.push_back(i);
-            hash_map.insert(std::make_pair(key, value));
-        } else {
-            hash_map[key].push_back(i);
-        }
-    }
-    
-    // convert hash_map to a vector of values
-    std::vector<std::vector<size_t>> hash_map_vec;
-    for (auto it = hash_map.begin(); it != hash_map.end(); ++it) {
-        std::vector<size_t> value = it->second;
-        hash_map_vec.push_back(value);
-    }
-    hash_map.clear();
-    GlobalAddress<std::vector<std::vector<size_t>>> hash_vec_addr = make_global(&hash_map_vec);
-    std::cout << "finish hashing" << std::endl;
-
-    size_t result_siz = hash_map_vec.size();
-    GlobalAddress<size_t> key_index = Grappa::global_alloc<size_t>(result_siz);
-    GlobalAddress<Vector> value_index = Grappa::global_alloc<Vector>(result_siz);
-    forall<SyncMode::Async, &foralle>(value_index, result_siz, [](int64_t i, Vector& value) {
+GlobalAddress<Vector> groupby(std::vector<Series> group_by_column, size_t hash_key_range) {
+    GlobalAddress<Vector> hash_map = Grappa::global_alloc<Vector>(hash_key_range);
+    forall<SyncMode::Async, &foralle>(hash_map, hash_key_range, [](int64_t i, Vector& value) {
         value._size = 0;
         value._capacity = 0;
         value._buffer = nullptr;
     });
     foralle.wait();
 
+    size_t element_size = get_element_size(group_by_column[0].type);
+    size_t capacity = group_by_column[0].length();
+    size_t num_series = group_by_column.size();
+    GlobalAddress<GlobalAddress<Chunk>> data = Grappa::global_alloc<GlobalAddress<Chunk>>(group_by_column.size());
+    for (size_t i = 0; i < group_by_column.size(); i++) {
+        GlobalAddress<Chunk> chunk_data = group_by_column[i].get_data()->get_data();
+        delegate::write(data + i, chunk_data);
+    }
 
+    size_t num_chunks = group_by_column[0].get_data()->num_chunks();
+    GlobalAddress<Chunk> first_column_data = group_by_column[0].get_data()->get_data();
 
-
-    forall<SyncMode::Async, &foralle>(value_index, result_siz, [=](int64_t i, Vector& value) {
-    
-        size_t vec_siz = delegate::call(hash_vec_addr, [=](std::vector<std::vector<size_t>>* inner_vec) {
-            size_t vec_siz = (*inner_vec)[i].size();
-            return vec_siz;
-        });
-        value.resize(vec_siz);
-        for (size_t j = 0; j < vec_siz; j++) {
-            size_t value_id = delegate::call(hash_vec_addr, [=](std::vector<std::vector<size_t>>* inner_vec) {
-                size_t value_id = (*inner_vec)[i][j];
-                return value_id;
+    forall<SyncMode::Async, &foralle>(first_column_data, num_chunks, [=](int64_t i, Chunk& value) {
+        Chunk* other_chunks = new Chunk[num_series];
+        other_chunks[0] = value;
+        for (size_t j = 1; j < num_series; j++) {
+            GlobalAddress<Chunk> chunk_data = delegate::read(data + j);
+            other_chunks[j] = delegate::read(chunk_data + i);
+        }
+        size_t st_idx = i * CHUNK_SIZE / element_size;
+        size_t ed_idx = (i + 1) * CHUNK_SIZE / element_size;
+        if (ed_idx > capacity) {
+            ed_idx = capacity;
+        }
+        for (size_t j = st_idx; j < ed_idx; j++) {
+            std::vector<uint8_t> key(element_size * num_series);
+            for (size_t k = 0; k < num_series; k++) {
+                uint8_t* element = other_chunks[k].get(j - st_idx, element_size);
+                for (size_t l = 0; l < element_size; l++) {
+                    key.push_back(element[l]);
+                }
+                delete[] element;
+            }
+            size_t seed = key.size();
+            for(auto x : key) {
+                x = ((x >> 16) ^ x) * 0x45d9f3b;
+                x = ((x >> 16) ^ x) * 0x45d9f3b;
+                x = (x >> 16) ^ x;
+                seed ^= x + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            }
+            size_t hash_key = seed % hash_key_range;
+            delegate::call(hash_map + hash_key, [=](Vector* value) {
+                (*value).push_back(j);
             });
-            value.push_back(value_id);
         }
     });
     foralle.wait();
+    forall<SyncMode::Async, &foralle>(hash_map, hash_key_range, [](int64_t i, Vector& value) {
+        if(value.size() == 0) {
+            value.push_back(0);
+        }
+    });
+    foralle.wait();
+
+    return hash_map;
+}
+
+void groupby_agg(std::vector<Series> group_by_column,
+                 std::vector<std::tuple<Series, std::string>> agg_columns,
+                 std::vector<Series>& result_key_column,
+                    std::vector<Series>& result_agg_column, size_t hash_key_range) {
+    
+    // std::map<std::vector<uint8_t>, std::vector<size_t>> hash_map;
+
+    // size_t cnt = group_by_column[0].length();
+    // for (int i = 0; i < cnt; i++) {
+    //     // get the key from the groupby column
+    //     std::vector<uint8_t> key;
+    //     for(Series series : group_by_column) {
+    //         // get 4 bytes key from the groupby column
+    //         size_t element_size = get_element_size(series.type);
+    //         uint8_t *key_start_byte = series.get(i);
+    //         for (size_t j = 0; j < element_size; j++) {
+    //             key.push_back(key_start_byte[j]);
+    //         }
+    //         delete[] key_start_byte;
+    //     }
+    //     // insert the key into the hash map
+    //     if (hash_map.find(key) == hash_map.end()) {
+    //         std::vector<size_t> value;
+    //         value.push_back(i);
+    //         hash_map.insert(std::make_pair(key, value));
+    //     } else {
+    //         hash_map[key].push_back(i);
+    //     }
+    // }
+    
+    // // convert hash_map to a vector of values
+    // std::vector<std::vector<size_t>> hash_map_vec;
+    // for (auto it = hash_map.begin(); it != hash_map.end(); ++it) {
+    //     std::vector<size_t> value = it->second;
+    //     hash_map_vec.push_back(value);
+    // }
+    // hash_map.clear();
+    // GlobalAddress<std::vector<std::vector<size_t>>> hash_vec_addr = make_global(&hash_map_vec);
+    // std::cout << "finish hashing" << std::endl;
+
+    size_t result_siz = hash_key_range;
+    GlobalAddress<Vector> value_index = groupby(group_by_column, hash_key_range);
+    // GlobalAddress<FixedVector> fixed_value_index = Grappa::global_alloc<FixedVector>(result_siz);
+    // forall<SyncMode::Async, &foralle>(fixed_value_index, result_siz, [=](int64_t i, FixedVector& value) {
+    //     size_t siz = delegate::call(value_index + i, [](Vector* inner_vec) {
+    //         size_t siz = (*inner_vec).size();
+    //         return siz;
+    //     });
+    //     value.length = siz;
+    //     value.buffer = global_alloc<size_t>(siz);
+    // });
+    // foralle.wait();
+    // forall<SyncMode::Async, &foralle>(value_index, result_siz, [=](int64_t i, Vector& value) {
+    //     size_t siz = value.size();
+    //     for (size_t j = 0; j < siz; j++) {
+    //         size_t value_id = value.at(j);
+    //         FixedVector fixed_vec = delegate::read(fixed_value_index + i);
+    //         delegate::write(fixed_vec.buffer + j, value_id);
+    //     }
+    // });
+    GlobalAddress<size_t> key_index = Grappa::global_alloc<size_t>(result_siz);
+    
+    
+    // GlobalAddress<Vector> value_index = Grappa::global_alloc<Vector>(result_siz);
+    // forall<SyncMode::Async, &foralle>(value_index, result_siz, [](int64_t i, Vector& value) {
+    //     value._size = 0;
+    //     value._capacity = 0;
+    //     value._buffer = nullptr;
+    // });
+    // foralle.wait();
+
+
+
+
+    // forall<SyncMode::Async, &foralle>(value_index, result_siz, [=](int64_t i, Vector& value) {
+    
+    //     size_t vec_siz = delegate::call(hash_vec_addr, [=](std::vector<std::vector<size_t>>* inner_vec) {
+    //         size_t vec_siz = (*inner_vec)[i].size();
+    //         return vec_siz;
+    //     });
+    //     value.resize(vec_siz);
+    //     for (size_t j = 0; j < vec_siz; j++) {
+    //         size_t value_id = delegate::call(hash_vec_addr, [=](std::vector<std::vector<size_t>>* inner_vec) {
+    //             size_t value_id = (*inner_vec)[i][j];
+    //             return value_id;
+    //         });
+    //         value.push_back(value_id);
+    //     }
+    // });
+    // foralle.wait();
     forall<SyncMode::Async, &foralle>(key_index, result_siz, [=](int64_t i, size_t& key_id) {
-        key_id = delegate::call(hash_vec_addr, [=](std::vector<std::vector<size_t>>* inner_vec) {
-            size_t key_id = (*inner_vec)[i][0];
+        key_id = delegate::call(value_index + i, [=](Vector* inner_vec) {
+            size_t key_id = (*inner_vec).at(0);
             return key_id;
         });
     });
     foralle.wait();
-    hash_map_vec.clear();
+
+    // hash_map_vec.clear();
 
     // size_t idx = 0;
     // for(auto it = hash_map.begin(); it != hash_map.end(); ++it) {
@@ -691,7 +783,7 @@ Series read_series(std::string datatype, size_t series_id, size_t line_count) {
 
 
         forall<SyncMode::Async, &read_gce>(params_addr, 1, [=](int64_t i, CoreParam &inner_params){
-            std::cout << "core_id" << params_addr.core() << std::endl;
+            // std::cout << "core_id" << params_addr.core() << std::endl;
             size_t line_id = (size_t) st_id;
             size_t end_id = (size_t) ed_id;
             size_t inner_element_size = (size_t) e_size;
@@ -765,6 +857,30 @@ Series read_series(std::string datatype, size_t series_id, size_t line_count) {
     return Series(chunked_data, datatype, name);
 }
 
+void groupby_test(std::vector<Series> sources, std::vector<size_t> key_ids, std::vector<std::tuple<size_t, std::string>> aggs, size_t hash_key_range) {
+    std::vector<Series> group_by_column;
+    for (size_t key_id : key_ids) {
+        group_by_column.push_back(sources[key_id]);
+    }
+    std::vector<std::tuple<Series, std::string>> agg_columns;
+    for (std::tuple<size_t, std::string> agg : aggs) {
+        size_t agg_id = std::get<0>(agg);
+        std::string agg_func = std::get<1>(agg);
+        agg_columns.push_back(std::make_tuple(sources[agg_id], agg_func));
+    }
+    std::vector<Series> result_key_column;
+    std::vector<Series> result_agg_column;
+    groupby_agg(group_by_column, agg_columns, result_key_column, result_agg_column, hash_key_range);
+    std::vector<Series> result_columns;
+    result_columns.insert(result_columns.end(), result_key_column.begin(), result_key_column.end());
+    result_columns.insert(result_columns.end(), result_agg_column.begin(), result_agg_column.end());
+    print_result(result_columns);
+    // free memory
+    for (Series series : result_columns) {
+        GlobalAddress<Chunk> data = series.get_data()->get_data();
+        global_free(data);
+    }
+}
 
 void test_groupby_agg(int line_count) {
     std::cout<< "start reading series" << std::endl;
@@ -784,28 +900,107 @@ void test_groupby_agg(int line_count) {
         original_frame.push_back(series);
     }
     read_gce.wait();
+    std::cout<< "finish reading series" << std::endl;
 
-    std::vector<Series> group_by_column;
-    group_by_column.push_back(original_frame[0]);
-    group_by_column.push_back(original_frame[1]);
+    double dataframe_start = walltime();
+    // groupby_test(original_frame, {0, 1, 2, 3, 4, 5}, {{6, "sum"}, {8, "sum"}}, 100000000);
+    // groupby_test(original_frame, {0, 1, 2, 3, 4, 5}, {{6, "sum"}, {8, "sum"}}, 100000000);
+    // groupby_test(original_frame, {0}, {{6, "sum"}}, 100);
+    // groupby_test(original_frame, {0, 1}, {{6, "sum"}}, 10000);
+    // groupby_test(original_frame, {2}, {{6, "sum"}, {8, "sum"}}, 1000000);
+    // groupby_test(original_frame, {3}, {{6, "sum"}, {8, "sum"}}, 100);
+    // groupby_test(original_frame, {5}, {{6, "sum"}, {8, "sum"}}, 1000000);
+    // groupby_test(original_frame, {3, 4}, {{8, "sum"}, {8, "min"}}, 10000);
+    // groupby_test(original_frame, {2}, {{6, "min"}, {7, "min"}}, 1000000);
+    // groupby_test(original_frame, {5}, {{8, "min"}}, 1000000);
+    // groupby_test(original_frame, {1, 3}, {{6, "sum"}, {7, "sum"}}, 10000);
+    // groupby_test(original_frame, {0}, {{6, "sum"}}, 100);
+    // groupby_test(original_frame, {0, 1}, {{6, "sum"}}, 10000);
+    // groupby_test(original_frame, {2}, {{6, "sum"}, {8, "sum"}}, 1000000);
+    // groupby_test(original_frame, {3}, {{6, "sum"}, {8, "sum"}}, 100);
+    // groupby_test(original_frame, {5}, {{6, "sum"}, {8, "sum"}}, 1000000);
+    // groupby_test(original_frame, {3, 4}, {{8, "sum"}, {8, "min"}}, 10000);
+    // groupby_test(original_frame, {2}, {{6, "min"}, {7, "min"}}, 1000000);
+    // groupby_test(original_frame, {5}, {{8, "min"}}, 1000000);
+    // groupby_test(original_frame, {1, 3}, {{6, "sum"}, {7, "sum"}}, 10000);
+    // groupby_test(original_frame, {0}, {{6, "sum"}}, 100);
+    // groupby_test(original_frame, {0, 1}, {{6, "sum"}}, 10000);
+    // groupby_test(original_frame, {2}, {{6, "sum"}, {8, "sum"}}, 1000000);
+    // groupby_test(original_frame, {3}, {{6, "sum"}, {8, "sum"}}, 100);
+    // groupby_test(original_frame, {5}, {{6, "sum"}, {8, "sum"}}, 1000000);
+    // groupby_test(original_frame, {3, 4}, {{8, "sum"}, {8, "min"}}, 10000);
+    // groupby_test(original_frame, {2}, {{6, "min"}, {7, "min"}}, 1000000);
+    // groupby_test(original_frame, {5}, {{8, "min"}}, 1000000);
+    // groupby_test(original_frame, {1, 3}, {{6, "sum"}, {7, "sum"}}, 10000);
     
-    print_result(group_by_column);
+    // groupby_test(original_frame, {0, 1, 2, 3, 4, 5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100000000);
+    // groupby_test(original_frame, {0, 1, 2, 3, 4, 5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100000000);
+    groupby_test(original_frame, {0}, {std::make_tuple(6, "sum")}, 100);
+    groupby_test(original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
+    groupby_test(original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    groupby_test(original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100);
+    groupby_test(original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    groupby_test(original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
+    groupby_test(original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
+    groupby_test(original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
+    groupby_test(original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
+    groupby_test(original_frame, {0}, {std::make_tuple(6, "sum")}, 100);
+    groupby_test(original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
+    groupby_test(original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    groupby_test(original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100);
+    groupby_test(original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    groupby_test(original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
+    groupby_test(original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
+    groupby_test(original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
+    groupby_test(original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
+    groupby_test(original_frame, {0}, {std::make_tuple(6, "sum")}, 100);
+    groupby_test(original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
+    groupby_test(original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    groupby_test(original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100);
+    groupby_test(original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    groupby_test(original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
+    groupby_test(original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
+    groupby_test(original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
+    groupby_test(original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
+    std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
 
-    std::vector<std::tuple<Series, std::string>> agg_columns;
-    agg_columns.push_back(std::make_tuple(original_frame[6], "sum"));
-    agg_columns.push_back(std::make_tuple(original_frame[8], "min"));
 
-    std::vector<Series> result_key_column;
-    std::vector<Series> result_agg_column;
+// {   
+//     std::vector<Series> group_by_column;
+//     group_by_column.push_back(original_frame[0]);
+//     group_by_column.push_back(original_frame[1]);
+//     group_by_column.push_back(original_frame[2]);
+//     group_by_column.push_back(original_frame[3]);
+//     group_by_column.push_back(original_frame[4]);
+//     group_by_column.push_back(original_frame[5]);
+//     std::vector<std::tuple<Series, std::string>> agg_columns;
+//     agg_columns.push_back(std::make_tuple(original_frame[6], "sum"));
+//     agg_columns.push_back(std::make_tuple(original_frame[8], "sum"));
+//     std::vector<Series> result_key_column;
+//     std::vector<Series> result_agg_column;
+//     groupby_agg(group_by_column, agg_columns, result_key_column, result_agg_column, 100000000);
+//     std::vector<Series> result_columns;
+//     result_columns.insert(result_columns.end(), result_key_column.begin(), result_key_column.end());
+//     result_columns.insert(result_columns.end(), result_agg_column.begin(), result_agg_column.end());
+//     print_result(result_columns);
+// }
 
-    groupby_agg(group_by_column, agg_columns, result_key_column, result_agg_column);
+// {   
+//     std::vector<Series> group_by_column;
+//     group_by_column.push_back(original_frame[0]);
+//     group_by_column.push_back(original_frame[1]);
+//     std::vector<std::tuple<Series, std::string>> agg_columns;
+//     agg_columns.push_back(std::make_tuple(original_frame[6], "sum"));
+//     agg_columns.push_back(std::make_tuple(original_frame[8], "min"));
+//     std::vector<Series> result_key_column;
+//     std::vector<Series> result_agg_column;
+//     groupby_agg(group_by_column, agg_columns, result_key_column, result_agg_column, 10000);
+//     std::vector<Series> result_columns;
+//     result_columns.insert(result_columns.end(), result_key_column.begin(), result_key_column.end());
+//     result_columns.insert(result_columns.end(), result_agg_column.begin(), result_agg_column.end());
+//     print_result(result_columns);
+// }
 
-    std::vector<Series> result_columns;
-    result_columns.insert(result_columns.end(), result_key_column.begin(), result_key_column.end());
-    result_columns.insert(result_columns.end(), result_agg_column.begin(), result_agg_column.end());
-
-    // print the result in csv format
-    print_result(result_columns);
 }
 
 
