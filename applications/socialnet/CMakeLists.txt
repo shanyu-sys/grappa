@@ -15,6 +15,7 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 
 set(SOURCES
     main.cpp
+    frame.cpp
     frame.hpp
     video.cpp
     video.hpp

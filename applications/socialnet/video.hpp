@@ -5,24 +5,29 @@
 #include <iostream>
 #include <vector>
 #include "constants.h"
-#include "frame.hpp"
 #include <Grappa.hpp>
 #include <Delegate.hpp>
+#include "frame.hpp"
 
 using namespace Grappa;
-class Video {
+
+class Video
+{
 public:
     int width;
     int height;
-    GlobalAddress<Frame> frames = global_alloc<Frame>(MAX_FRAMES);
-    
+    std::vector<Frame> frames;
+
     // initialize
-    Video(int w, int h) : width(w), height(h) {}
+    Video(int w, int h) : width(w), height(h)
+    {
+    }
 
     // add a frame
-    void addFrame(int i, Frame f)
+    void addFrame(int i, cv::Mat &f)
     {
-        delegate::write(frames + i, f);
+        Frame frame = Frame(f);
+        frames.push_back(frame);
     }
 
     // deep copy
@@ -30,14 +35,28 @@ public:
     {
         width = v.width;
         height = v.height;
-        frames = global_alloc<Frame>(MAX_FRAMES);
-        memcpy(frames, v.frames, MAX_FRAMES);
+
+        // deep copy frames
+        for (int i = 0; i < MAX_FRAMES; i++)
+        {
+            Frame fCopy = v.frames[i];
+            frames.push_back(fCopy);
+        }
+        assert(frames.size() == MAX_FRAMES);
     }
 
+    Frame *getFrame(int i)
+    {
+        return &frames[i];
+    }
+
+    subFrameGlobalAddrs getSubFrameAddrs(int i)
+    {
+        Frame *f = &frames[i];
+        return subFrameGlobalAddrs(f->subframeaddrs);
+    }
 };
 
 Video decode();
-
-
 
 #endif // VIDEO_HPP
