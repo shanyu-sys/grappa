@@ -442,10 +442,6 @@ GlobalAddress<Vector> groupby(std::vector<Series> group_by_column, size_t hash_k
         value._buffer = nullptr;
     });
     foralle.wait();
-
-
-    auto mirror_map = GlobalHashMap<size_t,>::create(g->nmirrors);
-
     size_t element_size = get_element_size(group_by_column[0].type);
     size_t capacity = group_by_column[0].length();
     size_t num_series = group_by_column.size();
@@ -952,11 +948,10 @@ void test_groupby_agg(int line_count) {
     GlobalAddress<std::vector<Series>> original_frame_addr = make_global(&original_frame);
 
 
-    // size_t core_tmp = 0;
+    size_t core_tmp = 0;
     for (int tmp_times = 0; tmp_times < 2; tmp_times ++) {
-        // GlobalAddress<size_t> gsize = make_global(&core_tmp, tmp_times * 7 % cores());
-        // forall<>
-        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+        GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - (tmp_times % cores()));
+        forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
             std::cout << "task ran on " << mycore() << std::endl;
             std::vector<Series> inner_original_frame;
             size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
@@ -978,41 +973,49 @@ void test_groupby_agg(int line_count) {
 
 
     for (int tmp_times = 0; tmp_times < 3; tmp_times ++) {
-        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
-            std::cout << "task ran on " << mycore();
-            std::vector<Series> inner_original_frame;
-            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
-                size_t series_cnt = (*inner_vec).size();
-                return series_cnt;
-            });
-            for (size_t i = 0; i < series_cnt; i++) {
-                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
-                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
-                    return chunked_data;
+        {
+            GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - ((tmp_times * 9 + 2 + 1) % cores()));
+            forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
+                std::cout << "task ran on " << mycore();
+                std::vector<Series> inner_original_frame;
+                size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                    size_t series_cnt = (*inner_vec).size();
+                    return series_cnt;
                 });
-                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
-                inner_original_frame.push_back(series);
-            }
-            groupby_test(inner_original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
-        });
-        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
-            std::cout << "task ran on " << mycore();
-            std::vector<Series> inner_original_frame;
-            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
-                size_t series_cnt = (*inner_vec).size();
-                return series_cnt;
+                for (size_t i = 0; i < series_cnt; i++) {
+                    ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                        ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                        return chunked_data;
+                    });
+                    Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                    inner_original_frame.push_back(series);
+                }
+                groupby_test(inner_original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
             });
-            for (size_t i = 0; i < series_cnt; i++) {
-                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
-                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
-                    return chunked_data;
+        }
+        {
+            GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - ((tmp_times * 9 + 2 + 2) % cores()));
+            forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
+                std::cout << "task ran on " << mycore();
+                std::vector<Series> inner_original_frame;
+                size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                    size_t series_cnt = (*inner_vec).size();
+                    return series_cnt;
                 });
-                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
-                inner_original_frame.push_back(series);
-            }
-            groupby_test(inner_original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
-        });
-        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+                for (size_t i = 0; i < series_cnt; i++) {
+                    ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                        ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                        return chunked_data;
+                    });
+                    Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                    inner_original_frame.push_back(series);
+                }
+                groupby_test(inner_original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
+            });
+        }
+        {
+            GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - ((tmp_times * 9 + 2 + 3) % cores()));
+            forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
             size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
@@ -1029,7 +1032,10 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
         });
-        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+        }
+        {
+            GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - ((tmp_times * 9 + 2 + 4) % cores()));
+            forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
             size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
@@ -1046,7 +1052,10 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 10000 /*100*/);
         });
-        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+        }
+        {
+            GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - ((tmp_times * 9 + 2 + 5) % cores()));
+            forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
             size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
@@ -1063,7 +1072,10 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
         });
-        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+        }
+        {
+            GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - ((tmp_times * 9 + 2 + 6) % cores()));
+            forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
             size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
@@ -1080,7 +1092,10 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
         });
-        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+        }
+        {
+            GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - ((tmp_times * 9 + 2 + 7) % cores()));
+            forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
             size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
@@ -1097,7 +1112,10 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
         });
-        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+        }
+        {
+            GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - ((tmp_times * 9 + 2 + 8) % cores()));
+            forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
             size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
@@ -1114,7 +1132,10 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
         });
-        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+        }
+        {
+            GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - ((tmp_times * 9 + 2 + 9) % cores()));
+            forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
             size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
@@ -1131,10 +1152,12 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
         });
+        }
     }
 
 
-    joiner.wait();
+    // joiner.wait();
+    groupbye.wait();
     std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
 
 
