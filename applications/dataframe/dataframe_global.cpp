@@ -29,7 +29,7 @@ using namespace Grappa;
 // #define READ_CHUNKS_PER_CORE 100000
 #define FILE_NAME "G1_1e8_1e2_0_0.csv"
 #define LINE_COUNT 100000000
-#define READ_CHUNKS_PER_CORE 1000000
+#define READ_CHUNKS_PER_CORE 524288
 // #define FILE_NAME "group_2.csv"
 // #define LINE_COUNT 6
 
@@ -322,6 +322,10 @@ void select_keys(ChunkedArray* original_column, GlobalAddress<size_t> key_index,
     result_key_column->select_from(original_column, key_index);
 }
 
+struct Buffer {
+    uint32_t buffer[CHUNK_SIZE/4];
+};
+
 void agg_sum(ChunkedArray* original_column, GlobalAddress<Vector> value_index, ChunkedArray* result_value_column, uint8_t type /*0 int32 1 float64*/) {
     GlobalAddress<Chunk> original_data = original_column->get_data();
     GlobalAddress<Chunk> result_data = result_value_column->get_data();
@@ -338,34 +342,39 @@ void agg_sum(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
         }
         for (size_t j = result_stidx; j < result_edidx; j++) {
             size_t result_inner_idx = j % (CHUNK_SIZE / element_size);
-            // if (j >= 10000) {
-            //     std::cout << "result_inner_idx: " << result_inner_idx << std::endl;
-            // }
             size_t vec_len = delegate::call(value_index + j, [](Vector* value) {
                 size_t vec_len = (*value).size();
                 return vec_len;
             });
             double sum = 0;
-            for (size_t k = 0; k < vec_len; k++) {
-                size_t kth_idx = delegate::call(value_index + j, [=](Vector* value) {
-                    size_t kth_idx = (*value).at(k);
-                    return kth_idx;
+            for (size_t k = 0; k < vec_len; k+=16) {
+                size_t num_elems = std::min((size_t)16, vec_len - k);
+                struct Buffer b = delegate::call(value_index + j, [num_elems, k](Vector* value) {
+                    struct Buffer inner_buffer;
+                    for (size_t l = 0; l < num_elems; l++) {
+                        inner_buffer.buffer[l] = (uint32_t)(*value).at(k + l);
+                    }
+                    return inner_buffer;
                 });
-                size_t chunk_index = kth_idx / (CHUNK_SIZE / element_size);
-                size_t inner_index = kth_idx % (CHUNK_SIZE / element_size);
-                if (chunk_index >= (LINE_COUNT * element_size + CHUNK_SIZE - 1) / CHUNK_SIZE) {
-                    std::cout << "chunk_index: " << chunk_index << std::endl;
+
+                for (size_t l = 0; l < num_elems; l++) {
+                    size_t kth_idx = b.buffer[l];
+                    size_t chunk_index = kth_idx / (CHUNK_SIZE / element_size);
+                    size_t inner_index = kth_idx % (CHUNK_SIZE / element_size);
+                    if (chunk_index >= (LINE_COUNT * element_size + CHUNK_SIZE - 1) / CHUNK_SIZE) {
+                        std::cout << "chunk_index: " << chunk_index << std::endl;
+                    }
+                    Chunk chunk = delegate::read(original_data + chunk_index);
+                    uint8_t* element = chunk.get(inner_index, element_size);
+                    if (type == 0) {
+                        sum += *((int32_t*) element);
+                    } else if (type == 1) {
+                        sum += *((double*) element);
+                    } else {
+                        throw std::invalid_argument("Unsupported data type");
+                    }
+                    delete[] element;                   
                 }
-                Chunk chunk = delegate::read(original_data + chunk_index);
-                uint8_t* element = chunk.get(inner_index, element_size);
-                if (type == 0) {
-                    sum += *((int32_t*) element);
-                } else if (type == 1) {
-                    sum += *((double*) element);
-                } else {
-                    throw std::invalid_argument("Unsupported data type");
-                }
-                delete[] element;
             }
             if (type == 0) {
                 uint32_t sum_int = (uint32_t) sum;
@@ -392,33 +401,39 @@ void agg_min(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
             result_edidx = length;
         }
         for (size_t j = result_stidx; j < result_edidx; j++) {
-            // size_t key_idx = delegate::call(value_index +j, [](std::vector<size_t>* value) {
-            //     size_t key_idx = (*value).at(0);
-            //     return key_idx;
-            // });
             size_t result_inner_idx = j % (CHUNK_SIZE / element_size);
             size_t vec_len = delegate::call(value_index + j, [](Vector* value) {
                 size_t vec_len = (*value).size();
                 return vec_len;
             });
             double minval = (double)(1.0E10);
-            for (size_t k = 0; k < vec_len; k++) {
-                size_t kth_idx = delegate::call(value_index + j, [=](Vector* value) {
-                    size_t kth_idx = (*value).at(k);
-                    return kth_idx;
+            for (size_t k = 0; k < vec_len; k+=16) {
+                size_t num_elems = std::min((size_t)16, vec_len - k);
+                struct Buffer b = delegate::call(value_index + j, [num_elems, k](Vector* value) {
+                    struct Buffer inner_buffer;
+                    for (size_t l = 0; l < num_elems; l++) {
+                        inner_buffer.buffer[l] = (uint32_t)(*value).at(k + l);
+                    }
+                    return inner_buffer;
                 });
-                size_t chunk_index = kth_idx / (CHUNK_SIZE / element_size);
-                size_t inner_index = kth_idx % (CHUNK_SIZE / element_size);
-                Chunk chunk = delegate::read(original_data + chunk_index);
-                uint8_t* element = chunk.get(inner_index, element_size);
-                if (type == 0) {
-                    minval = std::min(minval, (double)(*((int32_t*) element)));
-                } else if (type == 1) {
-                    minval = std::min(minval, *((double*) element));
-                } else {
-                    throw std::invalid_argument("Unsupported data type");
-                } 
-                delete[] element;
+                for (size_t l = 0; l < num_elems; l++) {
+                    size_t kth_idx = b.buffer[l];
+                    size_t chunk_index = kth_idx / (CHUNK_SIZE / element_size);
+                    size_t inner_index = kth_idx % (CHUNK_SIZE / element_size);
+                    if (chunk_index >= (LINE_COUNT * element_size + CHUNK_SIZE - 1) / CHUNK_SIZE) {
+                        std::cout << "chunk_index: " << chunk_index << std::endl;
+                    }
+                    Chunk chunk = delegate::read(original_data + chunk_index);
+                    uint8_t* element = chunk.get(inner_index, element_size);
+                    if (type == 0) {
+                        minval = std::min(minval, (double)(*((int32_t*) element)));
+                    } else if (type == 1) {
+                        minval = std::min(minval, *((double*) element));
+                    } else {
+                        throw std::invalid_argument("Unsupported data type");
+                    } 
+                    delete[] element;                  
+                }
             }
             if (type == 0) {
                 uint32_t min_int = (uint32_t) minval;
@@ -655,7 +670,7 @@ void groupby_agg(std::vector<Series> group_by_column,
         result_key_column.push_back(result_series);
     }
 
-    std::cout << "finish selecting keys" << std::endl;
+    std::cout << "finish selecting keys size: " << hash_key_range << std::endl;
     std::flush(std::cout);
 
     // aggregation
