@@ -37,6 +37,7 @@ const size_t CHUNK_SIZE = 64;
 
 GlobalCompletionEvent read_gce;
 GlobalCompletionEvent foralle;
+CompletionEvent joiner;
 
 std::string strip(const std::string& str) {
     auto start = std::find_if_not(str.begin(), str.end(), [](unsigned char ch) {
@@ -150,10 +151,12 @@ private:
     GlobalAddress<Chunk> _data;
 
 public:
+    ChunkedArray() : _elementSize(0), _capacity(0), _num_chunks(0), _data() {}
     ChunkedArray(size_t elementSize, size_t capacity) : _elementSize(elementSize), _capacity(capacity) {
         _num_chunks = (_capacity * _elementSize + CHUNK_SIZE - 1) / CHUNK_SIZE;
         _data = Grappa::global_alloc<Chunk>(_num_chunks);
     }
+
 
     size_t length() const {
         return _capacity;
@@ -882,6 +885,43 @@ void groupby_test(std::vector<Series> sources, std::vector<size_t> key_ids, std:
     }
 }
 
+std::string get_type_by_id(int series_id) {
+    if(series_id == 0 || series_id == 1 || series_id == 2 || series_id == 3 || series_id == 4 || series_id == 5) {
+        return "UINT32";
+    } else if (series_id == 6 || series_id == 7) {
+        return "INT32";
+    } else if (series_id == 8) {
+        return "FLOAT64";
+    } else {
+        throw std::invalid_argument("Unsupported data type");
+    }
+}
+
+std::string get_name_by_id(int series_id) {
+    if(series_id == 0) {
+        return "id1";
+    } else if (series_id == 1) {
+        return "id2";
+    } else if (series_id == 2) {
+        return "id3";
+    } else if (series_id == 3) {
+        return "id4";
+    } else if (series_id == 4) {
+        return "id5";
+    } else if (series_id == 5) {
+        return "id6";
+    } else if (series_id == 6) {
+        return "v1";
+    } else if (series_id == 7) {
+        return "v2";
+    } else if (series_id == 8) {
+        return "v3";
+    } else {
+        throw std::invalid_argument("Unsupported data type");
+    }
+}
+
+
 void test_groupby_agg(int line_count) {
     std::cout<< "start reading series" << std::endl;
     std::vector<std::string> datatypes = {"UINT32", "UINT32", "UINT32", "UINT32", "UINT32", "UINT32", "INT32", "INT32", "FLOAT64"};
@@ -903,109 +943,232 @@ void test_groupby_agg(int line_count) {
     std::cout<< "finish reading series" << std::endl;
 
     double dataframe_start = walltime();
-    CompletionEvent joiner;
 
     GlobalAddress<std::vector<Series>> original_frame_addr = make_global(&original_frame);
 
-    spawn<unbound>(&joiner, [original_frame_addr]{
-        std::cout << "task ran on " << mycore();
-        std::vector<Series> inner_original_frame;
-        size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
-            size_t series_cnt = (*inner_vec).size();
-            return series_cnt;
-        });
-        for (size_t i = 0; i < series_cnt; i++) {
-            Series series = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
-                Series series = (*inner_vec)[i];
-                return series;
+
+
+    for (int tmp_times = 0; tmp_times < 2; tmp_times ++) {
+        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+            std::cout << "task ran on " << mycore() << std::endl;
+            std::vector<Series> inner_original_frame;
+            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                size_t series_cnt = (*inner_vec).size();
+                std::cout << "series_cnt: " << series_cnt << std::endl;
+                return series_cnt;
             });
-            inner_original_frame.push_back(series);
-        }
-        groupby_test(inner_original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
-    });
-
-    groupby_test(original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
-    std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
-    groupby_test(original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
-    std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
-    groupby_test(original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
-    std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
-    groupby_test(original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 10000 /*100*/);
-    std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
-    groupby_test(original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
-    std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
-    groupby_test(original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
-    std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
-    groupby_test(original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
-    std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
-    groupby_test(original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
-    groupby_test(original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
-
-    groupby_test(original_frame, {0, 1, 2, 3, 4, 5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100000000);
-    std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
-    groupby_test(original_frame, {0, 1, 2, 3, 4, 5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100000000);
-    std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
-
-    groupby_test(original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
-    groupby_test(original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
-    groupby_test(original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
-    groupby_test(original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 10000 /*100*/);
-    groupby_test(original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
-    groupby_test(original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
-    groupby_test(original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
-    groupby_test(original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
-    groupby_test(original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
+            for (size_t i = 0; i < series_cnt; i++) {
+                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                    return chunked_data;
+                });
+                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                inner_original_frame.push_back(series);
+            }
+            groupby_test(inner_original_frame, {0, 1, 2, 3, 4, 5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100000000);
+        });
+        for(int i = 0; i < 1000000; i ++) {
+  i = i + 2 -1;
+  i = i-1;
+};
+    }
 
 
-    groupby_test(original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
-    groupby_test(original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
-    groupby_test(original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
-    groupby_test(original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 10000 /*100*/);
-    groupby_test(original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
-    groupby_test(original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
-    groupby_test(original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
-    groupby_test(original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
-    groupby_test(original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
+    for (int tmp_times = 0; tmp_times < 3; tmp_times ++) {
+        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+            std::cout << "task ran on " << mycore();
+            std::vector<Series> inner_original_frame;
+            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                size_t series_cnt = (*inner_vec).size();
+                return series_cnt;
+            });
+            for (size_t i = 0; i < series_cnt; i++) {
+                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                    return chunked_data;
+                });
+                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                inner_original_frame.push_back(series);
+            }
+            groupby_test(inner_original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
+        });
+        for(int i = 0; i < 1000000; i ++) {
+  i = i + 2 -1;
+};
+        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+            std::cout << "task ran on " << mycore();
+            std::vector<Series> inner_original_frame;
+            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                size_t series_cnt = (*inner_vec).size();
+                return series_cnt;
+            });
+            for (size_t i = 0; i < series_cnt; i++) {
+                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                    return chunked_data;
+                });
+                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                inner_original_frame.push_back(series);
+            }
+            groupby_test(inner_original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
+        });
+        for(int i = 0; i < 1000000; i ++) {
+  i = i + 2 -1;
+};
+        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+            std::cout << "task ran on " << mycore();
+            std::vector<Series> inner_original_frame;
+            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                size_t series_cnt = (*inner_vec).size();
+                return series_cnt;
+            });
+            for (size_t i = 0; i < series_cnt; i++) {
+                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                    return chunked_data;
+                });
+                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                inner_original_frame.push_back(series);
+            }
+            groupby_test(inner_original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+        });
+        for(int i = 0; i < 1000000; i ++) {
+  i = i + 2 -1;
+  i = i-1;
+};
+        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+            std::cout << "task ran on " << mycore();
+            std::vector<Series> inner_original_frame;
+            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                size_t series_cnt = (*inner_vec).size();
+                return series_cnt;
+            });
+            for (size_t i = 0; i < series_cnt; i++) {
+                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                    return chunked_data;
+                });
+                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                inner_original_frame.push_back(series);
+            }
+            groupby_test(inner_original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 10000 /*100*/);
+        });
+        for(int i = 0; i < 1000000; i ++) {
+  i = i + 2 -1;
+  i = i-1;
+};
+        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+            std::cout << "task ran on " << mycore();
+            std::vector<Series> inner_original_frame;
+            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                size_t series_cnt = (*inner_vec).size();
+                return series_cnt;
+            });
+            for (size_t i = 0; i < series_cnt; i++) {
+                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                    return chunked_data;
+                });
+                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                inner_original_frame.push_back(series);
+            }
+            groupby_test(inner_original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+        });
+        for(int i = 0; i < 1000000; i ++) {
+  i = i + 2 -1;
+  i = i-1;
+};
+        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+            std::cout << "task ran on " << mycore();
+            std::vector<Series> inner_original_frame;
+            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                size_t series_cnt = (*inner_vec).size();
+                return series_cnt;
+            });
+            for (size_t i = 0; i < series_cnt; i++) {
+                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                    return chunked_data;
+                });
+                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                inner_original_frame.push_back(series);
+            }
+            groupby_test(inner_original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
+        });
+        for(int i = 0; i < 1000000; i ++) {
+  i = i + 2 -1;
+  i = i-1;
+};
+        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+            std::cout << "task ran on " << mycore();
+            std::vector<Series> inner_original_frame;
+            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                size_t series_cnt = (*inner_vec).size();
+                return series_cnt;
+            });
+            for (size_t i = 0; i < series_cnt; i++) {
+                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                    return chunked_data;
+                });
+                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                inner_original_frame.push_back(series);
+            }
+            groupby_test(inner_original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
+        });
+        for(int i = 0; i < 1000000; i ++) {
+  i = i + 2 -1;
+  i = i-1;
+};
+        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+            std::cout << "task ran on " << mycore();
+            std::vector<Series> inner_original_frame;
+            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                size_t series_cnt = (*inner_vec).size();
+                return series_cnt;
+            });
+            for (size_t i = 0; i < series_cnt; i++) {
+                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                    return chunked_data;
+                });
+                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                inner_original_frame.push_back(series);
+            }
+            groupby_test(inner_original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
+        });
+        for(int i = 0; i < 1000000; i ++) {
+  i = i + 2 -1;
+  i = i-1;
+};
+        spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
+            std::cout << "task ran on " << mycore();
+            std::vector<Series> inner_original_frame;
+            size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+                size_t series_cnt = (*inner_vec).size();
+                return series_cnt;
+            });
+            for (size_t i = 0; i < series_cnt; i++) {
+                ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+                    ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+                    return chunked_data;
+                });
+                Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+                inner_original_frame.push_back(series);
+            }
+            groupby_test(inner_original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
+        });
+        for(int i = 0; i < 1000000; i ++) {
+  i = i + 2 -1;
+  i = i-1;
+};
+    }
+
 
     joiner.wait();
     std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
 
 
-// {   
-//     std::vector<Series> group_by_column;
-//     group_by_column.push_back(original_frame[0]);
-//     group_by_column.push_back(original_frame[1]);
-//     group_by_column.push_back(original_frame[2]);
-//     group_by_column.push_back(original_frame[3]);
-//     group_by_column.push_back(original_frame[4]);
-//     group_by_column.push_back(original_frame[5]);
-//     std::vector<std::tuple<Series, std::string>> agg_columns;
-//     agg_columns.push_back(std::make_tuple(original_frame[6], "sum"));
-//     agg_columns.push_back(std::make_tuple(original_frame[8], "sum"));
-//     std::vector<Series> result_key_column;
-//     std::vector<Series> result_agg_column;
-//     groupby_agg(group_by_column, agg_columns, result_key_column, result_agg_column, 100000000);
-//     std::vector<Series> result_columns;
-//     result_columns.insert(result_columns.end(), result_key_column.begin(), result_key_column.end());
-//     result_columns.insert(result_columns.end(), result_agg_column.begin(), result_agg_column.end());
-//     print_result(result_columns);
-// }
-
-// {   
-//     std::vector<Series> group_by_column;
-//     group_by_column.push_back(original_frame[0]);
-//     group_by_column.push_back(original_frame[1]);
-//     std::vector<std::tuple<Series, std::string>> agg_columns;
-//     agg_columns.push_back(std::make_tuple(original_frame[6], "sum"));
-//     agg_columns.push_back(std::make_tuple(original_frame[8], "min"));
-//     std::vector<Series> result_key_column;
-//     std::vector<Series> result_agg_column;
-//     groupby_agg(group_by_column, agg_columns, result_key_column, result_agg_column, 10000);
-//     std::vector<Series> result_columns;
-//     result_columns.insert(result_columns.end(), result_key_column.begin(), result_key_column.end());
-//     result_columns.insert(result_columns.end(), result_agg_column.begin(), result_agg_column.end());
-//     print_result(result_columns);
-// }
 
 }
 
@@ -1033,3 +1196,58 @@ int main(int argc, char *argv[])
     finalize();
     return 0;
 }
+
+
+
+
+
+
+
+
+
+
+
+    
+
+    // groupby_test(original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
+    // std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
+    // groupby_test(original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
+    // std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
+    // groupby_test(original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    // std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
+    // groupby_test(original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 10000 /*100*/);
+    // std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
+    // groupby_test(original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    // std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
+    // groupby_test(original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
+    // std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
+    // groupby_test(original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
+    // std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
+    // groupby_test(original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
+    // groupby_test(original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
+
+    // groupby_test(original_frame, {0, 1, 2, 3, 4, 5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100000000);
+    // std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
+    // groupby_test(original_frame, {0, 1, 2, 3, 4, 5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100000000);
+    // std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
+
+    // groupby_test(original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
+    // groupby_test(original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
+    // groupby_test(original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    // groupby_test(original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 10000 /*100*/);
+    // groupby_test(original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    // groupby_test(original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
+    // groupby_test(original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
+    // groupby_test(original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
+    // groupby_test(original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
+
+
+    // groupby_test(original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
+    // groupby_test(original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
+    // groupby_test(original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    // groupby_test(original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 10000 /*100*/);
+    // groupby_test(original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
+    // groupby_test(original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
+    // groupby_test(original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
+    // groupby_test(original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
+    // groupby_test(original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
