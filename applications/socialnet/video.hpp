@@ -11,6 +11,10 @@
 
 using namespace Grappa;
 
+struct FrameGlobalAddrs{
+    subFrameGlobalAddrs data[MAX_FRAMES];
+};
+
 class Video
 {
 public:
@@ -55,6 +59,17 @@ public:
         Frame *f = &frames[i];
         return subFrameGlobalAddrs(f->subframeaddrs);
     }
+
+    FrameGlobalAddrs getFrameAddrs()
+    {
+        FrameGlobalAddrs fga;
+        for (int i = 0; i < MAX_FRAMES; i++)
+        {
+            fga.data[i] = getSubFrameAddrs(i);
+        }
+        return fga;
+    }
+
 };
 
 Video decode();

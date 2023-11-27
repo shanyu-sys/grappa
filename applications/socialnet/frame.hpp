@@ -89,4 +89,6 @@ public:
 
 cv::Mat subFrametoMat(subFrameGlobalAddrs subframeaddrs);
 
+void process_frame(cv::Mat &image);
+
 #endif // FRAME_HPP
