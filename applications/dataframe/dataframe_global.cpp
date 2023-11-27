@@ -15,6 +15,7 @@
 
 #include <Grappa.hpp>
 #include <Delegate.hpp>
+#include <GlobalHashMap.hpp>
 using namespace Grappa;
 
 // datatype: 0 int32 1 float64 2 uint32
@@ -37,6 +38,7 @@ const size_t CHUNK_SIZE = 64;
 
 GlobalCompletionEvent read_gce;
 GlobalCompletionEvent foralle;
+GlobalCompletionEvent groupbye;
 CompletionEvent joiner;
 
 std::string strip(const std::string& str) {
@@ -440,6 +442,9 @@ GlobalAddress<Vector> groupby(std::vector<Series> group_by_column, size_t hash_k
         value._buffer = nullptr;
     });
     foralle.wait();
+
+
+    auto mirror_map = GlobalHashMap<size_t,>::create(g->nmirrors);
 
     size_t element_size = get_element_size(group_by_column[0].type);
     size_t capacity = group_by_column[0].length();
@@ -947,8 +952,10 @@ void test_groupby_agg(int line_count) {
     GlobalAddress<std::vector<Series>> original_frame_addr = make_global(&original_frame);
 
 
-
+    // size_t core_tmp = 0;
     for (int tmp_times = 0; tmp_times < 2; tmp_times ++) {
+        // GlobalAddress<size_t> gsize = make_global(&core_tmp, tmp_times * 7 % cores());
+        // forall<>
         spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
             std::cout << "task ran on " << mycore() << std::endl;
             std::vector<Series> inner_original_frame;
@@ -967,10 +974,6 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {0, 1, 2, 3, 4, 5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100000000);
         });
-        for(int i = 0; i < 1000000; i ++) {
-  i = i + 2 -1;
-  i = i-1;
-};
     }
 
 
@@ -992,9 +995,6 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
         });
-        for(int i = 0; i < 1000000; i ++) {
-  i = i + 2 -1;
-};
         spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
@@ -1012,9 +1012,6 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {0, 1}, {std::make_tuple(6, "sum")}, 10000);
         });
-        for(int i = 0; i < 1000000; i ++) {
-  i = i + 2 -1;
-};
         spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
@@ -1032,10 +1029,6 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {2}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
         });
-        for(int i = 0; i < 1000000; i ++) {
-  i = i + 2 -1;
-  i = i-1;
-};
         spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
@@ -1053,10 +1046,6 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 10000 /*100*/);
         });
-        for(int i = 0; i < 1000000; i ++) {
-  i = i + 2 -1;
-  i = i-1;
-};
         spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
@@ -1074,10 +1063,6 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 1000000);
         });
-        for(int i = 0; i < 1000000; i ++) {
-  i = i + 2 -1;
-  i = i-1;
-};
         spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
@@ -1095,10 +1080,6 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {3, 4}, {std::make_tuple(8, "sum"), std::make_tuple(8, "min")}, 10000);
         });
-        for(int i = 0; i < 1000000; i ++) {
-  i = i + 2 -1;
-  i = i-1;
-};
         spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
@@ -1116,10 +1097,6 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {2}, {std::make_tuple(6, "min"), std::make_tuple(7, "min")}, 1000000);
         });
-        for(int i = 0; i < 1000000; i ++) {
-  i = i + 2 -1;
-  i = i-1;
-};
         spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
@@ -1137,10 +1114,6 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {5}, {std::make_tuple(8, "min")}, 1000000);
         });
-        for(int i = 0; i < 1000000; i ++) {
-  i = i + 2 -1;
-  i = i-1;
-};
         spawn<TaskMode::Unbound>(&joiner, [original_frame_addr]{
             std::cout << "task ran on " << mycore();
             std::vector<Series> inner_original_frame;
@@ -1158,10 +1131,6 @@ void test_groupby_agg(int line_count) {
             }
             groupby_test(inner_original_frame, {1, 3}, {std::make_tuple(6, "sum"), std::make_tuple(7, "sum")}, 10000);
         });
-        for(int i = 0; i < 1000000; i ++) {
-  i = i + 2 -1;
-  i = i-1;
-};
     }
 
 
