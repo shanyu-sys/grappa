@@ -29,12 +29,21 @@ using namespace Grappa;
 // #define READ_CHUNKS_PER_CORE 100000
 #define FILE_NAME "G1_1e8_1e2_0_0.csv"
 #define LINE_COUNT 100000000
-#define READ_CHUNKS_PER_CORE 524288
+const size_t CHUNK_SIZE = 32;
+#define READ_CHUNKS_PER_CORE 1048576
+// const size_t CHUNK_SIZE = 64;
+// #define READ_CHUNKS_PER_CORE 524288
+// const size_t CHUNK_SIZE = 128;
+// #define READ_CHUNKS_PER_CORE 262144
+
+
+
 // #define FILE_NAME "group_2.csv"
 // #define LINE_COUNT 6
 
+#define AGG_CNT 64
 
-const size_t CHUNK_SIZE = 64;
+
 
 GlobalCompletionEvent read_gce;
 GlobalCompletionEvent foralle;
@@ -114,14 +123,6 @@ class Chunk {
 public:
     uint8_t buffer[CHUNK_SIZE];
     uint8_t* get(size_t inner_index, size_t element_size) {
-        if(inner_index * element_size + element_size > CHUNK_SIZE) {
-            std::cout << "get" << std::endl;
-            std::cout << "inner_index: " << inner_index << std::endl;
-            std::cout << "element_size: " << element_size << std::endl;
-            std::cout << "CHUNK_SIZE: " << CHUNK_SIZE << std::endl;
-            std::cout << "inner_index * element_size + element_size: " << inner_index * element_size + element_size << std::endl;
-            throw std::out_of_range("Index is out of bounds");
-        }
         uint8_t* result = new uint8_t[element_size];
         for (size_t i = 0; i < element_size; i++) {
             result[i] = buffer[inner_index * element_size + i];
@@ -129,15 +130,19 @@ public:
         return result;
     }
 
+    size_t get_eight(size_t inner_index) {
+        size_t result = 0;
+        result = *((size_t*) (buffer + inner_index * 8));
+        return result;
+    }
+
+    uint32_t get_four(size_t inner_index) {
+        uint32_t result = 0;
+        result = *((uint32_t*) (buffer + inner_index * 4));
+        return result;
+    }
+
     void put(size_t inner_index, size_t element_size, const void *data) {
-        if (inner_index * element_size + element_size > CHUNK_SIZE) {
-            std::cout << "put" << std::endl;
-            std::cout << "inner_index: " << inner_index << std::endl;
-            std::cout << "element_size: " << element_size << std::endl;
-            std::cout << "CHUNK_SIZE: " << CHUNK_SIZE << std::endl;
-            std::cout << "inner_index * element_size + element_size: " << inner_index * element_size + element_size << std::endl;
-            throw std::out_of_range("Index is out of bounds");
-        }
         uint8_t* value = (uint8_t*) data;
         for (size_t i = 0; i < element_size; i++) {
             buffer[inner_index * element_size + i] = value[i];
@@ -195,6 +200,7 @@ public:
         GlobalAddress<Chunk> original_data = original_column->get_data();
         size_t element_size = _elementSize;
         forall<SyncMode::Async, &foralle>(_data, _num_chunks, [=](int64_t chunk_idx, Chunk& value) {
+        // forall(_data, _num_chunks, [=](int64_t chunk_idx, Chunk& value) {
             size_t result_stidx = chunk_idx * CHUNK_SIZE / element_size;
             size_t result_edidx = (chunk_idx + 1) * CHUNK_SIZE / element_size;
             if(result_edidx > _capacity) {
@@ -205,13 +211,20 @@ public:
                 size_t index = delegate::read(key_index + i);
                 size_t chunk_index = index / (CHUNK_SIZE / element_size);
                 size_t inner_index = index % (CHUNK_SIZE / element_size);
-                Chunk chunk = delegate::read(original_data + chunk_index);
-                uint8_t* element = chunk.get(inner_index, element_size);
-                value.put(i - result_stidx, element_size, element);
-                delete[] element;
+                // uint32_t element = delegate::call(original_data + chunk_index, [inner_index](Chunk* chunk) {
+                //     uint32_t element = element = chunk->get_four(inner_index);
+                //     return element;
+                // });
+                GlobalAddress<uint32_t> element_addr = GlobalAddress<uint32_t>::Raw((size_t)(original_data + chunk_index).raw_bits() + inner_index * 4);
+                uint32_t element = delegate::read(element_addr);
+                if (element_size == 4) {
+                    value.put(i - result_stidx, element_size, (uint8_t*)(&element));
+                } else {
+                    throw std::invalid_argument("Unsupported element size");
+                }
             }
         });
-        foralle.wait();
+        // foralle.wait();
     }
 };
 
@@ -302,28 +315,12 @@ int get_element_size(std::string datatype) {
 
 
 
-// void extract_index(ConcurHashmap& hash_map,
-//                    std::vector<size_t>& key_index,
-//                    std::vector<size_t>& value_index,
-//                    std::vector<size_t>& group_index) {
-//     int v_idx = 0;
-//     for (auto it = hash_map.begin(); it != hash_map.end(); ++it) {
-//         key_index.push_back(it->second[0]);
-//         value_index.push_back(v_idx);
-//         for (size_t value : it->second) {
-//             v_idx++;
-//             group_index.push_back(value);
-//         }
-//     }
-//     value_index.push_back(v_idx);
-// }
-
 void select_keys(ChunkedArray* original_column, GlobalAddress<size_t> key_index, ChunkedArray* result_key_column) {
     result_key_column->select_from(original_column, key_index);
 }
 
 struct Buffer {
-    uint32_t buffer[CHUNK_SIZE/4];
+    uint32_t buffer[AGG_CNT];
 };
 
 void agg_sum(ChunkedArray* original_column, GlobalAddress<Vector> value_index, ChunkedArray* result_value_column, uint8_t type /*0 int32 1 float64*/) {
@@ -334,6 +331,7 @@ void agg_sum(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
     size_t num_chunks = result_value_column->num_chunks();
 
     forall<SyncMode::Async, &foralle>(result_data, num_chunks, [=](int64_t i, Chunk& value) {
+    // forall(result_data, num_chunks, [=](int64_t i, Chunk& value) {
         // std::cout << "Aggregate on core: " << Grappa::mycore() << std::endl;
         size_t result_stidx = i * CHUNK_SIZE / element_size;
         size_t result_edidx = (i + 1) * CHUNK_SIZE / element_size;
@@ -347,8 +345,8 @@ void agg_sum(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
                 return vec_len;
             });
             double sum = 0;
-            for (size_t k = 0; k < vec_len; k+=16) {
-                size_t num_elems = std::min((size_t)16, vec_len - k);
+            for (size_t k = 0; k < vec_len; k+=AGG_CNT) {
+                size_t num_elems = std::min((size_t)AGG_CNT, vec_len - k);
                 struct Buffer b = delegate::call(value_index + j, [num_elems, k](Vector* value) {
                     struct Buffer inner_buffer;
                     for (size_t l = 0; l < num_elems; l++) {
@@ -364,16 +362,25 @@ void agg_sum(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
                     if (chunk_index >= (LINE_COUNT * element_size + CHUNK_SIZE - 1) / CHUNK_SIZE) {
                         std::cout << "chunk_index: " << chunk_index << std::endl;
                     }
-                    Chunk chunk = delegate::read(original_data + chunk_index);
-                    uint8_t* element = chunk.get(inner_index, element_size);
                     if (type == 0) {
-                        sum += *((int32_t*) element);
+                        // int32_t element = delegate::call(original_data + chunk_index, [inner_index](Chunk* chunk) {
+                        //     int32_t element = (int32_t)(chunk->get_four(inner_index));
+                        //     return element;
+                        // });
+                        GlobalAddress<int32_t> element_addr = GlobalAddress<int32_t>::Raw((size_t)(original_data + chunk_index).raw_bits() + inner_index * 4);
+                        int32_t element = delegate::read(element_addr);
+                        sum += element;
                     } else if (type == 1) {
-                        sum += *((double*) element);
+                        // size_t element = delegate::call(original_data + chunk_index, [inner_index](Chunk* chunk) {
+                        //     size_t element = chunk->get_eight(inner_index);
+                        //     return element;
+                        // });
+                        GlobalAddress<size_t> element_addr = GlobalAddress<size_t>::Raw((size_t)(original_data + chunk_index).raw_bits() + inner_index * 8);
+                        size_t element = delegate::read(element_addr);
+                        sum += *((double*)(&element));
                     } else {
                         throw std::invalid_argument("Unsupported data type");
-                    }
-                    delete[] element;                   
+                    }             
                 }
             }
             if (type == 0) {
@@ -384,7 +391,7 @@ void agg_sum(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
             }
         }
     });
-    foralle.wait();
+    // foralle.wait();
 }
 
 void agg_min(ChunkedArray* original_column, GlobalAddress<Vector> value_index, ChunkedArray* result_value_column, uint8_t type /*0 int32 1 float64*/)   {
@@ -395,6 +402,7 @@ void agg_min(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
     size_t num_chunks = result_value_column->num_chunks();
 
     forall<SyncMode::Async, &foralle>(result_data, num_chunks, [=](int64_t i, Chunk& value) {
+    // forall(result_data, num_chunks, [=](int64_t i, Chunk& value) {
         size_t result_stidx = i * CHUNK_SIZE / element_size;
         size_t result_edidx = (i + 1) * CHUNK_SIZE / element_size;
         if(result_edidx > length) {
@@ -423,16 +431,21 @@ void agg_min(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
                     if (chunk_index >= (LINE_COUNT * element_size + CHUNK_SIZE - 1) / CHUNK_SIZE) {
                         std::cout << "chunk_index: " << chunk_index << std::endl;
                     }
-                    Chunk chunk = delegate::read(original_data + chunk_index);
-                    uint8_t* element = chunk.get(inner_index, element_size);
                     if (type == 0) {
-                        minval = std::min(minval, (double)(*((int32_t*) element)));
+                        GlobalAddress<int32_t> element_addr = GlobalAddress<int32_t>::Raw((size_t)(original_data + chunk_index).raw_bits() + inner_index * 4);
+                        int32_t element = delegate::read(element_addr);
+                        minval = std::min(minval, (double)element);
                     } else if (type == 1) {
-                        minval = std::min(minval, *((double*) element));
+                        // size_t element = delegate::call(original_data + chunk_index, [inner_index](Chunk* chunk) {
+                        //     size_t element = chunk->get_eight(inner_index);
+                        //     return element;
+                        // });
+                        GlobalAddress<size_t> element_addr = GlobalAddress<size_t>::Raw((size_t)(original_data + chunk_index).raw_bits() + inner_index * 8);
+                        size_t element = delegate::read(element_addr);
+                        minval = std::min(minval, *((double*)(&element)));
                     } else {
                         throw std::invalid_argument("Unsupported data type");
-                    } 
-                    delete[] element;                  
+                    }
                 }
             }
             if (type == 0) {
@@ -443,7 +456,7 @@ void agg_min(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
             }
         }
     });
-    foralle.wait();
+    // foralle.wait();
 }
 // implements group by and aggregation
 // input: groupby column, aggregation columns, aggregation functions
@@ -451,12 +464,13 @@ void agg_min(ChunkedArray* original_column, GlobalAddress<Vector> value_index, C
 
 GlobalAddress<Vector> groupby(std::vector<Series> group_by_column, size_t hash_key_range) {
     GlobalAddress<Vector> hash_map = Grappa::global_alloc<Vector>(hash_key_range);
-    forall<SyncMode::Async, &foralle>(hash_map, hash_key_range, [](int64_t i, Vector& value) {
+    // forall<SyncMode::Async, &foralle>(hash_map, hash_key_range, [](int64_t i, Vector& value) {
+    forall(hash_map, hash_key_range, [](int64_t i, Vector& value) {
         value._size = 0;
-        value._capacity = 0;
-        value._buffer = nullptr;
+        value._capacity = 1;
+        value._buffer = new size_t[1];
     });
-    foralle.wait();
+    // foralle.wait();
     size_t element_size = get_element_size(group_by_column[0].type);
     size_t capacity = group_by_column[0].length();
     size_t num_series = group_by_column.size();
@@ -469,7 +483,8 @@ GlobalAddress<Vector> groupby(std::vector<Series> group_by_column, size_t hash_k
     size_t num_chunks = group_by_column[0].get_data()->num_chunks();
     GlobalAddress<Chunk> first_column_data = group_by_column[0].get_data()->get_data();
 
-    forall<SyncMode::Async, &foralle>(first_column_data, num_chunks, [=](int64_t i, Chunk& value) {
+    // forall<SyncMode::Async, &foralle>(first_column_data, num_chunks, [=](int64_t i, Chunk& value) {
+    forall(first_column_data, num_chunks, [=](int64_t i, Chunk& value) {
         Chunk* other_chunks = new Chunk[num_series];
         other_chunks[0] = value;
         for (size_t j = 1; j < num_series; j++) {
@@ -501,13 +516,14 @@ GlobalAddress<Vector> groupby(std::vector<Series> group_by_column, size_t hash_k
             });
         }
     });
-    foralle.wait();
-    forall<SyncMode::Async, &foralle>(hash_map, hash_key_range, [](int64_t i, Vector& value) {
+    // foralle.wait();
+    // forall<SyncMode::Async, &foralle>(hash_map, hash_key_range, [](int64_t i, Vector& value) {
+    forall(hash_map, hash_key_range, [](int64_t i, Vector& value) {
         if(value.size() == 0) {
             value.push_back(0);
         }
     });
-    foralle.wait();
+    // foralle.wait();
 
     return hash_map;
 }
@@ -516,150 +532,19 @@ void groupby_agg(std::vector<Series> group_by_column,
                  std::vector<std::tuple<Series, std::string>> agg_columns,
                  std::vector<Series>& result_key_column,
                     std::vector<Series>& result_agg_column, size_t hash_key_range) {
-    
-    // std::map<std::vector<uint8_t>, std::vector<size_t>> hash_map;
-
-    // size_t cnt = group_by_column[0].length();
-    // for (int i = 0; i < cnt; i++) {
-    //     // get the key from the groupby column
-    //     std::vector<uint8_t> key;
-    //     for(Series series : group_by_column) {
-    //         // get 4 bytes key from the groupby column
-    //         size_t element_size = get_element_size(series.type);
-    //         uint8_t *key_start_byte = series.get(i);
-    //         for (size_t j = 0; j < element_size; j++) {
-    //             key.push_back(key_start_byte[j]);
-    //         }
-    //         delete[] key_start_byte;
-    //     }
-    //     // insert the key into the hash map
-    //     if (hash_map.find(key) == hash_map.end()) {
-    //         std::vector<size_t> value;
-    //         value.push_back(i);
-    //         hash_map.insert(std::make_pair(key, value));
-    //     } else {
-    //         hash_map[key].push_back(i);
-    //     }
-    // }
-    
-    // // convert hash_map to a vector of values
-    // std::vector<std::vector<size_t>> hash_map_vec;
-    // for (auto it = hash_map.begin(); it != hash_map.end(); ++it) {
-    //     std::vector<size_t> value = it->second;
-    //     hash_map_vec.push_back(value);
-    // }
-    // hash_map.clear();
-    // GlobalAddress<std::vector<std::vector<size_t>>> hash_vec_addr = make_global(&hash_map_vec);
-    // std::cout << "finish hashing" << std::endl;
 
     size_t result_siz = hash_key_range;
     GlobalAddress<Vector> value_index = groupby(group_by_column, hash_key_range);
-    // GlobalAddress<FixedVector> fixed_value_index = Grappa::global_alloc<FixedVector>(result_siz);
-    // forall<SyncMode::Async, &foralle>(fixed_value_index, result_siz, [=](int64_t i, FixedVector& value) {
-    //     size_t siz = delegate::call(value_index + i, [](Vector* inner_vec) {
-    //         size_t siz = (*inner_vec).size();
-    //         return siz;
-    //     });
-    //     value.length = siz;
-    //     value.buffer = global_alloc<size_t>(siz);
-    // });
-    // foralle.wait();
-    // forall<SyncMode::Async, &foralle>(value_index, result_siz, [=](int64_t i, Vector& value) {
-    //     size_t siz = value.size();
-    //     for (size_t j = 0; j < siz; j++) {
-    //         size_t value_id = value.at(j);
-    //         FixedVector fixed_vec = delegate::read(fixed_value_index + i);
-    //         delegate::write(fixed_vec.buffer + j, value_id);
-    //     }
-    // });
     GlobalAddress<size_t> key_index = Grappa::global_alloc<size_t>(result_siz);
-    
-    
-    // GlobalAddress<Vector> value_index = Grappa::global_alloc<Vector>(result_siz);
-    // forall<SyncMode::Async, &foralle>(value_index, result_siz, [](int64_t i, Vector& value) {
-    //     value._size = 0;
-    //     value._capacity = 0;
-    //     value._buffer = nullptr;
-    // });
-    // foralle.wait();
-
-
-
-
-    // forall<SyncMode::Async, &foralle>(value_index, result_siz, [=](int64_t i, Vector& value) {
-    
-    //     size_t vec_siz = delegate::call(hash_vec_addr, [=](std::vector<std::vector<size_t>>* inner_vec) {
-    //         size_t vec_siz = (*inner_vec)[i].size();
-    //         return vec_siz;
-    //     });
-    //     value.resize(vec_siz);
-    //     for (size_t j = 0; j < vec_siz; j++) {
-    //         size_t value_id = delegate::call(hash_vec_addr, [=](std::vector<std::vector<size_t>>* inner_vec) {
-    //             size_t value_id = (*inner_vec)[i][j];
-    //             return value_id;
-    //         });
-    //         value.push_back(value_id);
-    //     }
-    // });
-    // foralle.wait();
-    forall<SyncMode::Async, &foralle>(key_index, result_siz, [=](int64_t i, size_t& key_id) {
+    // forall<SyncMode::Async, &foralle>(key_index, result_siz, [=](int64_t i, size_t& key_id) {
+    forall(key_index, result_siz, [=](int64_t i, size_t& key_id) {
         key_id = delegate::call(value_index + i, [=](Vector* inner_vec) {
             size_t key_id = (*inner_vec).at(0);
             return key_id;
         });
     });
-    foralle.wait();
-
-    // hash_map_vec.clear();
-
-    // size_t idx = 0;
-    // for(auto it = hash_map.begin(); it != hash_map.end(); ++it) {
-    //     std::vector<size_t> value = it->second;
-    //     size_t key_id = value[0];
-    //     delegate::write(key_index + idx, key_id);
-    //     // std::cout << "value_index_address: " << value_index + idx << std::endl;
-    //     for (size_t i = 0; i < value.size(); i++) {
-    //         size_t value_id = value[i];
-    //         delegate::call(value_index + idx, [=](Vector* vec) {
-    //             // std::cout << "vec address: " << vec << std::endl;
-    //             // std::cout << "core_id: " << (value_index + idx).core() << std::endl;
-    //             // std::cout << "value_index[" << idx << "]: " << value_id << std::endl;
-    //             // std::cout << "vec capacity: " << (*vec).capacity() << std::endl;
-    //             (*vec).push_back(value_id);
-    //             // std::cout << "vec capacity after: " << (*vec).capacity() << std::endl;
-    //             // std::cout << "vec size: " << (*vec).size() << std::endl;
-    //         });
-    //         // delegate::call(value_index + idx, [=](Vector* vec) {
-    //         //     (*vec).push_back(value_id);
-    //         // });
-    //     }
-    //     idx += 1;
-    // }
-
-
-
+    // foralle.wait();
     std::cout << "finish writing index" << std::endl;
-
-    // Print all contents from key_index and value_index
-    // for (size_t i = 0; i < result_siz; i++) {
-    //     size_t key_id = delegate::read(key_index + i);
-    //     size_t vec_len = delegate::call(value_index + i, [](Vector* value) {
-    //         std::cout << "vec size: " << (*value).size() << std::endl;
-    //         size_t vec_len = (*value).size();
-    //         return vec_len;
-    //     });
-    //     std::cout << "value_index[" << i << "]: ";
-    //     for (size_t j = 0; j < vec_len; j++) {
-    //         size_t value_id = delegate::call(value_index + i, [j](Vector* value) {
-    //             size_t value_id = (*value).at(j);
-    //             return value_id;
-    //         });
-    //         std::cout << value_id << " ";
-    //     }
-    //     std::cout << std::endl;
-    // }
-
-
     // select keys
     for (Series series : group_by_column) {
         std::cout << "result_siz: " << result_siz << std::endl;
@@ -703,13 +588,16 @@ void groupby_agg(std::vector<Series> group_by_column,
         result_agg_column.push_back(result_series);
     }
 
-    Grappa::global_free(key_index);
-    forall<SyncMode::Async, &foralle>(value_index, result_siz, [](int64_t i, Vector& value) {
-        if (value._buffer != nullptr) {
-            delete []value._buffer;
-        }
-    });
     foralle.wait();
+
+    Grappa::global_free(key_index);
+    // forall<SyncMode::Async, &foralle>(value_index, result_siz, [](int64_t i, Vector& value) {
+    // forall(value_index, result_siz, [](int64_t i, Vector& value) {
+    //     if (value._buffer != nullptr) {
+    //         delete []value._buffer;
+    //     }
+    // });
+    // foralle.wait();
     Grappa::global_free(value_index);
 }
 
@@ -851,28 +739,6 @@ Series read_series(std::string datatype, size_t series_id, size_t line_count) {
         delete params;
 
     }
-
-    // for (int i = 0; i < line_count; i+=1000000) {
-    //     if (i % 100000 == 0) {
-    //         std::cout << "finish reading line " << i << std::endl;
-    //     }
-    //     std::string line;
-    //     if (!std::getline(file, line)) {
-    //         break;
-    //     }
-    //     std::stringstream line_stream(line);
-    //     std::vector<std::string> row;
-    //     std::string cell;
-    //     while (std::getline(line_stream, cell, ',')) {
-    //         row.push_back(cell);
-    //     }
-    //     std::string str = row[series_id];
-    //     uint8_t* value = convert_string_to_anytype(datatype, str);
-    //     // data.append(value);
-    //     data.put(line_id, value);
-    //     delete[] value;
-    //     line_id++;
-    // }
     return Series(chunked_data, datatype, name);
 }
 
@@ -893,6 +759,7 @@ void groupby_test(std::vector<Series> sources, std::vector<size_t> key_ids, std:
     std::vector<Series> result_columns;
     result_columns.insert(result_columns.end(), result_key_column.begin(), result_key_column.end());
     result_columns.insert(result_columns.end(), result_agg_column.begin(), result_agg_column.end());
+    // innergroupbye.wait();
     print_result(result_columns);
     // free memory
     for (Series series : result_columns) {
@@ -988,6 +855,27 @@ void test_groupby_agg(int line_count) {
 
 
     for (int tmp_times = 0; tmp_times < 3; tmp_times ++) {
+        // if(tmp_times < 2) {
+        //     GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - (tmp_times % cores()));
+        //     forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
+        //         std::cout << "task ran on " << mycore() << std::endl;
+        //         std::vector<Series> inner_original_frame;
+        //         size_t series_cnt = delegate::call(original_frame_addr, [](std::vector<Series>* inner_vec) {
+        //             size_t series_cnt = (*inner_vec).size();
+        //             std::cout << "series_cnt: " << series_cnt << std::endl;
+        //             return series_cnt;
+        //         });
+        //         for (size_t i = 0; i < series_cnt; i++) {
+        //             ChunkedArray chunked_data = delegate::call(original_frame_addr, [i](std::vector<Series>* inner_vec) {
+        //                 ChunkedArray chunked_data = *((*inner_vec)[i].get_data());
+        //                 return chunked_data;
+        //             });
+        //             Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
+        //             inner_original_frame.push_back(series);
+        //         }
+        //         groupby_test(inner_original_frame, {0, 1, 2, 3, 4, 5}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 100000000);
+        //     });
+        // }
         {
             GlobalAddress<size_t> gsize = make_global(&core_tmp, cores() - 1 - ((tmp_times * 9 + 2 + 1) % cores()));
             forall<SyncMode::Async, &groupbye>(gsize, 1, [original_frame_addr](int64_t i, size_t& core_id){
@@ -1005,7 +893,7 @@ void test_groupby_agg(int line_count) {
                     Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
                     inner_original_frame.push_back(series);
                 }
-                groupby_test(inner_original_frame, {0}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
+                groupby_test(inner_original_frame, {0,1}, {std::make_tuple(6, "sum")}, 10000 /*100*/);
             });
         }
         {
@@ -1065,7 +953,7 @@ void test_groupby_agg(int line_count) {
                 Series series(chunked_data, get_type_by_id(i), get_name_by_id(i));
                 inner_original_frame.push_back(series);
             }
-            groupby_test(inner_original_frame, {3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 10000 /*100*/);
+            groupby_test(inner_original_frame, {1,3}, {std::make_tuple(6, "sum"), std::make_tuple(8, "sum")}, 10000 /*100*/);
         });
         }
         {

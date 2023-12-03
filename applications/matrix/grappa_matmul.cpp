@@ -128,10 +128,23 @@ void remote_strassen_mul(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Glo
     double read_start = walltime();
     GlobalAddress<Matrix> local_a_addr = make_global(&local_a);
     GlobalAddress<Matrix> local_b_addr = make_global(&local_b);
+
+    
+                // size_t num_elems = std::min((size_t)AGG_CNT, vec_len - k);
+                // struct Buffer b = delegate::call(value_index + j, [num_elems, k](Vector* value) {
+                //     struct Buffer inner_buffer;
+                //     for (size_t l = 0; l < num_elems; l++) {
+                //         inner_buffer.buffer[l] = (uint32_t)(*value).at(k + l);
+                //     }
+                //     return inner_buffer;
+                // });
+
+
     forall<&level4_gce>(a, m * m, [=](int64_t i, int32_t &a)
            { 
-            delegate::call(local_a_addr, [=](Matrix &local_a) {
-             local_a.elements[i] = a; });
+                delegate::call(local_a_addr, [=](Matrix &local_a) {
+                local_a.elements[i] = a; });
+                
             });
     
     forall<&level4_gce>(b, m * m, [=](int64_t i, int32_t &b)
