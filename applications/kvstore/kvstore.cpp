@@ -22,12 +22,12 @@
 #include <Metrics.hpp>
 
 DEFINE_double(get_ratio, 50, "Percentage of gets in workload");
-DEFINE_int64(iter, 200000, "Number of iterations");
-DEFINE_int64(num_lines, 200000, "Number of lines to read from file");
-DEFINE_string(filename, "/mnt/ssd/haoran/types_proj/baseline/GAM/dht/data/zipf.csv", "File to read from");
+DEFINE_int64(iter, 100000000, "Number of iterations");
+DEFINE_int64(num_lines, 100000000, "Number of lines to read from file");
+DEFINE_string(filename, "/mnt/ssd/haoran/types_proj/baseline/GAM/dht/data/data.csv", "File to read from");
 
 constexpr uint32_t KEY_SIZE = 100;
-constexpr uint32_t REPORT = 100000;
+constexpr uint32_t REPORT = 1000000;
 const int val_size = 32;
 
 // performance counters
@@ -93,7 +93,7 @@ void populate(const std::string &filePath, int64_t num_lines)
     int cnt = 0;
     while (cnt++ < FLAGS_iter && fgets(key, KEY_SIZE, fp))
     {
-        if (cnt % 10000 == 0)
+        if (cnt % 1000000 == 0)
         {
             fprintf(stdout, "populate %d\n", cnt);
             fflush(stdout);
@@ -180,7 +180,7 @@ void benchmark(const std::string &filePath, int64_t num_lines)
     else
         printf(", -");
     printf("\n");
-    std::cout << "Benchmark time on core " << mycore() << " locale " << mylocale() << ": " << duration << std::endl;
+    // std::cout << "Benchmark time on core " << mycore() << " locale " << mylocale() << ": " << duration << std::endl;
 }
 
 int main(int argc, char *argv[])
