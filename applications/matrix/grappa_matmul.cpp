@@ -13,6 +13,7 @@ using namespace Grappa;
 
 const size_t MATRIX_SIZE = 32768;
 // const size_t MATRIX_SIZE = 8192;
+// const size_t MATRIX_SIZE = 16384;
 
 GlobalCompletionEvent gce;
 GlobalCompletionEvent level1_gce;
@@ -128,18 +129,36 @@ void remote_strassen_mul(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Glo
     double read_start = walltime();
     GlobalAddress<Matrix> local_a_addr = make_global(&local_a);
     GlobalAddress<Matrix> local_b_addr = make_global(&local_b);
-    forall<&level4_gce>(a, m * m, [=](int64_t i, int32_t &a)
+    // forall<&level4_gce>(a, m * m, [=](int64_t i, int32_t &a)
+    //        { 
+    //         delegate::call(local_a_addr, [=](Matrix &local_a) {
+    //          local_a.elements[i] = a; });
+    //         });
+    
+    // forall<&level4_gce>(b, m * m, [=](int64_t i, int32_t &b)
+    //        { 
+    //         delegate::call(local_b_addr, [=](Matrix &local_b) {
+    //          local_b.elements[i] = b; });
+    //         });
+    forall<&level4_gce>(a, m * m, [=](int64_t s, int64_t n, int32_t *ea)
            { 
             delegate::call(local_a_addr, [=](Matrix &local_a) {
-             local_a.elements[i] = a; });
+             for (int64_t i = 0; i < n; i++)
+             {
+                 local_a.elements[s+i] = ea[i];
+             }
+             });
             });
     
-    forall<&level4_gce>(b, m * m, [=](int64_t i, int32_t &b)
+    forall<&level4_gce>(b, m * m, [=](int64_t s, int64_t n, int32_t *eb)
            { 
             delegate::call(local_b_addr, [=](Matrix &local_b) {
-             local_b.elements[i] = b; });
+             for (int64_t i = 0; i < n; i++)
+             {
+                 local_b.elements[s+i] = eb[i];
+             }
+             });
             });
-    
 
     level4_gce.wait();
     // for (int i = 0; i < m; i++)
@@ -161,9 +180,18 @@ void remote_strassen_mul(GlobalAddress<int32_t> a, GlobalAddress<int32_t> b, Glo
 
     double write_start = walltime();
     GlobalAddress <Matrix> local_c_addr = make_global(&local_c);
-    forall<&level4_gce>(c, m * m, [=](int64_t i, int32_t &c)
-           { c = delegate::call(local_c_addr, [=](Matrix &local_c) {
-             return local_c.elements[i]; });
+    // forall<&level4_gce>(c, m * m, [=](int64_t i, int32_t &c)
+    //        { c = delegate::call(local_c_addr, [=](Matrix &local_c) {
+    //          return local_c.elements[i]; });
+    //         });
+    forall<&level4_gce>(c, m * m, [=](int64_t s, int64_t n, int32_t *ec)
+           { 
+            delegate::call(local_c_addr, [=](Matrix &local_c) {
+             for (int64_t i = 0; i < n; i++)
+             {
+                 ec[i] = local_c.elements[s+i];
+             }
+             });
             });
 
     level4_gce.wait();

@@ -85,6 +85,27 @@ public:
             assert(memcmp(sf.data, f.subframes[i]->data, SUB_FRAME_SIZE) == 0);
         }
     }
+
+    // deep copy
+    Frame &operator=(const Frame &f)
+    {
+        for (int i = 0; i < NUM_SUB_FRAMES; i++)
+        {
+            std::shared_ptr<SubFrame> sf = std::make_shared<SubFrame>();
+            memcpy(sf->data, f.subframes[i]->data, SUB_FRAME_SIZE);
+            subframes.push_back(sf);
+            subframeaddrs.push_back(make_global(subframes[i].get()));
+        }
+        assert(subframes.size() == NUM_SUB_FRAMES);
+        // verify the copy
+        for (int i = 0; i < NUM_SUB_FRAMES; i++)
+        {
+            GlobalAddress<SubFrame> sf_addr = subframeaddrs[i];
+            SubFrame sf = delegate::read(sf_addr);
+            assert(memcmp(sf.data, f.subframes[i]->data, SUB_FRAME_SIZE) == 0);
+        }
+        return *this;
+    }
 };
 
 cv::Mat subFrametoMat(subFrameGlobalAddrs subframeaddrs);

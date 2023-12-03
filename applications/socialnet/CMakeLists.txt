@@ -18,7 +18,10 @@ set(SOURCES
     frame.cpp
     frame.hpp
     video.cpp
+    text.cpp
+    text.hpp
     video.hpp
+    post.hpp
 )
 
 add_grappa_application(socialnet ${SOURCES})

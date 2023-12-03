@@ -60,6 +60,7 @@ set(QUERIES_IND
   KMeansMR.cpp
   convert2bin.cpp
   HashJoin_tests.cpp
+  kvstore.cpp
 )
 
 set(QUERIES_SOURCES

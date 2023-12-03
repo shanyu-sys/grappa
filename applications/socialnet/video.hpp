@@ -43,10 +43,26 @@ public:
         // deep copy frames
         for (int i = 0; i < MAX_FRAMES; i++)
         {
-            Frame fCopy = v.frames[i];
+            Frame fCopy = Frame(v.frames[i]);
             frames.push_back(fCopy);
         }
         assert(frames.size() == MAX_FRAMES);
+    }
+
+    // deep copy
+    Video &operator=(const Video &v)
+    {
+        width = v.width;
+        height = v.height;
+
+        // deep copy frames
+        for (int i = 0; i < MAX_FRAMES; i++)
+        {
+            Frame fCopy = Frame(v.frames[i]);
+            frames.push_back(fCopy);
+        }
+        assert(frames.size() == MAX_FRAMES);
+        return *this;
     }
 
     Frame *getFrame(int i)

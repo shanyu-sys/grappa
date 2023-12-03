@@ -294,6 +294,9 @@ public:
           auto re = this->reenroll_count; // remember if we requested reenroll
           for (Core c = 0; c < cores(); c++) {
             send_heap_message(c, [this,re] {
+              if(count != 0) {
+                VLOG(1) << "core " << mycore() << " complete (" << count << ") -- gce(" << this << ") cores_out: " << cores_out;
+              }
               CHECK_EQ(count, 0);
               temporary_waking_cv = cv; // capture current list of waiters
               reset(); // reset, now anyone else calling `wait` should fall through
