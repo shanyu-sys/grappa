@@ -1,36 +1,115 @@
 #ifndef FRAME_HPP
 #define FRAME_HPP
 
-#include <opencv2/opencv.hpp>
+#include <cstdint>
 #include "constants.h"
+#include <vector>
+#include <memory>
+#include <Grappa.hpp>
+#include <Delegate.hpp>
+#include <iostream>
+#include <array>
+#include <opencv2/opencv.hpp>
 
-const uint32_t BLOCK_SIZE = 65536*8;
+using namespace Grappa;
 
-struct Frame
+struct SubFrame
 {
-    uint8_t data[FRAME_SIZE] = {0};
-
-    uint8_t data_padding[BLOCK_SIZE - FRAME_SIZE] = {0};
-
-    Frame(const cv::Mat &mat)
-    {
-        if (mat.isContinuous())
-        { 
-            memcpy(data, mat.data, FRAME_SIZE);
-        }
-        else
-        {
-            // Handle non-continuous case
-            for (int i = 0; i < mat.rows; ++i)
-            {
-                memcpy(data + i * mat.cols * mat.elemSize(), mat.ptr<uint8_t>(i), mat.cols * mat.elemSize());
-            }
-        }
-    }
-    Frame() {}
+    uint8_t data[SUB_FRAME_SIZE] = {0xff};
 };
 
-// static check that Frame is the right size
-static_assert(sizeof(Frame) == BLOCK_SIZE, "Frame is not the right size");
+struct subFrameGlobalAddrs
+{
+    GlobalAddress<SubFrame> data[NUM_SUB_FRAMES];
+
+    subFrameGlobalAddrs(std::vector<GlobalAddress<SubFrame>> subframeaddrs)
+    {
+        assert(subframeaddrs.size() == NUM_SUB_FRAMES);
+        for (int i = 0; i < NUM_SUB_FRAMES; i++)
+        {
+            this->data[i] = subframeaddrs[i];
+        }
+    }
+
+    subFrameGlobalAddrs() {}
+};
+
+class Frame
+{
+public:
+    std::vector<std::shared_ptr<SubFrame>> subframes;
+    std::vector<GlobalAddress<SubFrame>> subframeaddrs;
+
+    // public:
+    // default constructor: all sub frames as zeros
+    Frame()
+    {
+        for (int i = 0; i < NUM_SUB_FRAMES; i++)
+        {
+            std::shared_ptr<SubFrame> sf = std::make_shared<SubFrame>();
+            subframes.push_back(sf);
+            subframeaddrs.push_back(make_global(subframes[i].get()));
+        }
+        assert(subframes.size() == NUM_SUB_FRAMES);
+    }
+
+    // Frame is read from a cv::Mat
+    Frame(cv::Mat &mat)
+    {
+        for (int i = 0; i < NUM_SUB_FRAMES; i++)
+        {
+            std::shared_ptr<SubFrame> sf = std::make_shared<SubFrame>();
+            memcpy(sf->data, mat.data + i * SUB_FRAME_SIZE, SUB_FRAME_SIZE);
+            subframes.push_back(sf);
+            subframeaddrs.push_back(make_global(subframes[i].get()));
+        }
+        assert(subframes.size() == NUM_SUB_FRAMES);
+    }
+
+    // deep copy
+    Frame(const Frame &f)
+    {
+        for (int i = 0; i < NUM_SUB_FRAMES; i++)
+        {
+            std::shared_ptr<SubFrame> sf = std::make_shared<SubFrame>();
+            memcpy(sf->data, f.subframes[i]->data, SUB_FRAME_SIZE);
+            subframes.push_back(sf);
+            subframeaddrs.push_back(make_global(subframes[i].get()));
+        }
+        assert(subframes.size() == NUM_SUB_FRAMES);
+        // verify the copy
+        for (int i = 0; i < NUM_SUB_FRAMES; i++)
+        {
+            GlobalAddress<SubFrame> sf_addr = subframeaddrs[i];
+            SubFrame sf = delegate::read(sf_addr);
+            assert(memcmp(sf.data, f.subframes[i]->data, SUB_FRAME_SIZE) == 0);
+        }
+    }
+
+    // deep copy
+    Frame &operator=(const Frame &f)
+    {
+        for (int i = 0; i < NUM_SUB_FRAMES; i++)
+        {
+            std::shared_ptr<SubFrame> sf = std::make_shared<SubFrame>();
+            memcpy(sf->data, f.subframes[i]->data, SUB_FRAME_SIZE);
+            subframes.push_back(sf);
+            subframeaddrs.push_back(make_global(subframes[i].get()));
+        }
+        assert(subframes.size() == NUM_SUB_FRAMES);
+        // verify the copy
+        for (int i = 0; i < NUM_SUB_FRAMES; i++)
+        {
+            GlobalAddress<SubFrame> sf_addr = subframeaddrs[i];
+            SubFrame sf = delegate::read(sf_addr);
+            assert(memcmp(sf.data, f.subframes[i]->data, SUB_FRAME_SIZE) == 0);
+        }
+        return *this;
+    }
+};
+
+cv::Mat subFrametoMat(subFrameGlobalAddrs subframeaddrs);
+
+void process_frame(cv::Mat &image);
 
 #endif // FRAME_HPP

@@ -2,13 +2,14 @@
 #include <vector>
 #include <iostream>
 #include <tuple>
+#include "text.hpp"
 
 // define a struct for returning multiple values
-struct ProcessedText {
-    std::string text;
-    std::vector<std::string> mentions;
-    std::vector<std::string> urls;
-};
+// struct ProcessedText {
+//     std::string text;
+//     std::vector<std::string> mentions;
+//     std::vector<std::string> urls;
+// };
 
 ProcessedText process_text(std::string text) {
     std::vector<std::string> mentions;

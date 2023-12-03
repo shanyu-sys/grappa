@@ -143,6 +143,7 @@ public:
 // return as array of uint8_t
 uint8_t* convert_string_to_anytype(std::string datatype, std::string str) {
     if (datatype == "UINT32") {
+        // may result in memory leak, need to delete after append
         uint32_t value = std::stoul(str);
         uint8_t* result = new uint8_t[sizeof(uint32_t)];
         std::memcpy(result, &value, sizeof(uint32_t));
