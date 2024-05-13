@@ -24,7 +24,7 @@
 DEFINE_double(get_ratio, 50, "Percentage of gets in workload");
 DEFINE_int64(iter, 100000000, "Number of iterations");
 DEFINE_int64(num_lines, 100000000, "Number of lines to read from file");
-DEFINE_string(filename, "/mnt/ssd/haoran/types_proj/baseline/GAM/dht/data/data.csv", "File to read from");
+DEFINE_string(filename, "/mnt/ssd/guest/DRust_home/dataset/grappadht/data.csv", "File to read from");
 
 constexpr uint32_t KEY_SIZE = 100;
 constexpr uint32_t REPORT = 1000000;
@@ -129,6 +129,7 @@ void benchmark(const std::string &filePath, int64_t num_lines)
     char key[KEY_SIZE];
     GlobalAddress<Value> read_value;
     unsigned int seed = rand();
+    uint64_t local_finished = 0;
     uint64_t t1, t2;
     uint64_t last_report = start, current;
     int cnt = 0;
@@ -137,7 +138,7 @@ void benchmark(const std::string &filePath, int64_t num_lines)
         key[strlen(key) - 1] = 0;
         if (GetRandom(0, 100, &seed) < FLAGS_get_ratio)
         {
-            t1 = nstime();
+            // t1 = nstime();
             Table.lookup(std::stoull(std::string(key)), &read_value);
 
             // Value v2 = delegate::read(read_value);
@@ -146,40 +147,42 @@ void benchmark(const std::string &filePath, int64_t num_lines)
             // {
             //     std::cout << "value doesn't match" << std::endl;
             // }
-            t2 = nstime();
-            get_latency += (t2 - t1);
-            get_finished++;
+            // t2 = nstime();
+            // get_latency += (t2 - t1);
+            // get_finished++;
         }
         else
         {
-            t1 = nstime();
+            // t1 = nstime();
             Table.insert_unique(std::stoull(std::string(key)), v);
-            t2 = nstime();
-            set_latency += (t2 - t1);
-            set_finished++;
+            // t2 = nstime();
+            // set_latency += (t2 - t1);
+            // set_finished++;
         }
 
-        if (finished.fetch_add(1, std::memory_order_relaxed) % REPORT == 0)
-        {
-            current = mstime();
-            printf("%.2f\n", (1000.0 * REPORT) / (current - last_report));
-            last_report = current;
-        }
+        local_finished++;
+
+        // if (finished.fetch_add(1, std::memory_order_relaxed) % REPORT == 0)
+        // {
+        //     current = mstime();
+        //     printf("%.2f\n", (1000.0 * REPORT) / (current - last_report));
+        //     last_report = current;
+        // }
     }
 
     double duration = mstime() - start;
-    double gets = get_finished.load(), sets = set_finished.load();
-    double glat = get_latency.load(), slat = set_latency.load();
-    printf("%lu, %.2f", finished - 1, (finished - 1) * 1000 / duration);
-    if (gets > 0)
-        printf(", %.2f", glat / gets);
-    else
-        printf(", -");
-    if (sets > 0)
-        printf(", %.2f", slat / sets);
-    else
-        printf(", -");
-    printf("\n");
+    // double gets = get_finished.load(), sets = set_finished.load();
+    // double glat = get_latency.load(), slat = set_latency.load();
+    printf("%lu, %.2f", local_finished, local_finished * 1000 / duration);
+    // if (gets > 0)
+    //     printf(", %.2f", glat / gets);
+    // else
+    //     printf(", -");
+    // if (sets > 0)
+    //     printf(", %.2f", slat / sets);
+    // else
+    //     printf(", -");
+    // printf("\n");
     // std::cout << "Benchmark time on core " << mycore() << " locale " << mylocale() << ": " << duration << std::endl;
 }
 
@@ -205,12 +208,31 @@ int main(int argc, char *argv[])
         // set to R0?
         DHT_type::set_RO_global(&Table);
 
+
+        double start = walltime();
+
         // benchmark DHT
         on_all_cores([=]{
         // if(mycore() % 16 == 0){
         //     benchmark(FLAGS_filename, FLAGS_num_lines);
         // } 
         benchmark(FLAGS_filename, FLAGS_num_lines);
-        }); });
+        }); 
+
+        std::ofstream myFile;
+        int core_num = cores();
+        char logname[256] = "/mnt/ssd/guest/DRust_home/logs/kv_grappa_";
+        int length = strlen(logname);
+        logname[length] = '0' + (core_num/16);
+        logname[length+1] = '.';
+        logname[length+2] = 't';
+        logname[length+3] = 'x';
+        logname[length+4] = 't';
+        logname[length+5] = 0;
+        myFile.open(logname);
+        myFile << walltime() - start;
+        myFile.close();
+            
+    });
     Grappa::finalize();
 }
