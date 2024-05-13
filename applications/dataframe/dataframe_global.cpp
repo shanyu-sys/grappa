@@ -1061,10 +1061,22 @@ void test_groupby_agg(int line_count) {
 
     // joiner.wait();
     groupbye.wait();
+
+    std::ofstream myFile;
+    int core_num = cores();
+    char logname[256] = "/mnt/ssd/guest/DRust_home/logs/dataframe_grappa_";
+    int length = strlen(logname);
+    logname[length] = '0' + (core_num/16);
+    logname[length+1] = '.';
+    logname[length+2] = 't';
+    logname[length+3] = 'x';
+    logname[length+4] = 't';
+    logname[length+5] = 0;
+    myFile.open(logname);
+    myFile << walltime() - dataframe_start;
+    myFile.close();
+    
     std::cout << "dataframe time: " << walltime() - dataframe_start << " seconds" << std::endl;
-
-
-
 }
 
 

@@ -199,9 +199,9 @@ int main(int argc, char *argv[])
             double t_ed_mid = start;
 
 
-            for(int i = 0; i < 4; ++i) {
+            for(int i = 0; i < 9; ++i) {
                 finish([=]{
-                    forall<TaskMode::Unbound, SyncMode::Async>(i*5000, 5000, [](int64_t id){
+                    forall<TaskMode::Unbound, SyncMode::Async>(i*2048, 2048, [](int64_t id){
                         compose_post(id, "username", id, "0 1467810672 Mon Apr 06 22:19:49 PDT 2009 NO_QUERY scotthamilton is upset that he can't update his Facebook by texting it... and might cry as a result  School today also. Blah!",  id, "video",  static_cast<uint8_t>(0));
                     });
                 });
@@ -212,6 +212,21 @@ int main(int argc, char *argv[])
                 std::cout << "Iteration " << i << " takes " << walltime() - t_st << std::endl;
                 t_st = walltime();
             }
+
+            std::ofstream myFile;
+            int core_num = cores();
+            char logname[256] = "/mnt/ssd/guest/DRust_home/logs/sn_grappa_";
+            int length = strlen(logname);
+            logname[length] = '0' + (core_num/16);
+            logname[length+1] = '.';
+            logname[length+2] = 't';
+            logname[length+3] = 'x';
+            logname[length+4] = 't';
+            logname[length+5] = 0;
+            myFile.open(logname);
+            myFile << walltime() - start;
+            myFile.close();
+
             std::cout << "Elapsed time: " << walltime() - start << std::endl;
             std::cout << "Half time: " << walltime() - t_ed_mid << std::endl;
         std::cout << "***** test video done *****" << std::endl; });
