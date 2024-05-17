@@ -223,7 +223,7 @@ int main(int argc, char *argv[])
         int core_num = cores();
         char logname[256] = "/mnt/ssd/guest/DRust_home/logs/kv_grappa_";
         int length = strlen(logname);
-        logname[length] = '0' + (core_num/16);
+        logname[length] = '0' + core_num;
         logname[length+1] = '.';
         logname[length+2] = 't';
         logname[length+3] = 'x';
